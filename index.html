@@ -143,6 +143,52 @@
     <div class="modal-actions"><button class="secondary-button" data-close="confirmDialog">Cancel</button><button class="danger-button" id="confirmClear">Delete everything</button></div>
   </dialog>
   <div class="toast" id="toast"></div>
-  <script src="./app.js?v=20261107-2"></script>
+  <script src="./app.js?v=f348a1ed"></script>
+  <script>
+  (() => {
+    if (window.__vibeAppReady) return;
+    document.documentElement.dataset.vibeFallback = "active";
+    const warn = document.createElement("div");
+    warn.textContent = "Vibe Calling is using emergency UI mode. Refresh or re-download the latest version.";
+    warn.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#573d16;color:#fff;padding:7px 12px;text-align:center;font:12px system-ui";
+    document.body.appendChild(warn);
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("button");
+      if (!button) return;
+      const show = (name) => {
+        document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
+        document.getElementById(name + "View")?.classList.add("active");
+        document.querySelectorAll(".nav-item").forEach(v => v.classList.toggle("active", v.dataset.view === name));
+        const crumb = document.getElementById("crumb");
+        if (crumb) crumb.textContent = ({chat:"Chat",providers:"Providers",tools:"Agent tools",settings:"Settings"})[name] || name;
+        document.getElementById("sidebar")?.classList.remove("open");
+      };
+      if (button.dataset.view) { show(button.dataset.view); return; }
+      if (button.id === "newChatBtn") {
+        const box = document.getElementById("messages");
+        const welcome = document.getElementById("welcome");
+        if (box) box.innerHTML = "";
+        if (welcome) welcome.style.display = "block";
+        show("chat"); document.getElementById("messageInput")?.focus(); return;
+      }
+      if (button.id === "welcomeAddProvider" || button.id === "addProviderBtn") {
+        document.getElementById("providerDialog")?.showModal(); return;
+      }
+      if (button.id === "openSettings" || button.id === "settingsShortcut") { show("settings"); return; }
+      if (button.id === "mobileMenu") { document.getElementById("sidebar")?.classList.toggle("open"); return; }
+      if (button.id === "agentQuick") {
+        const toggle = document.getElementById("agentToggle");
+        if (toggle) { toggle.checked = !toggle.checked; document.getElementById("toolState").textContent = toggle.checked ? "on" : "off"; }
+        return;
+      }
+      if (button.dataset.prompt) {
+        const input = document.getElementById("messageInput");
+        if (input) { input.value = button.dataset.prompt; input.focus(); }
+        return;
+      }
+      if (button.dataset.close) { document.getElementById(button.dataset.close)?.close(); return; }
+    }, true);
+  })();
+  </script>
 </body>
 </html>
