@@ -30,6 +30,7 @@ For NVIDIA NIM, use `https://integrate.api.nvidia.com/v1`.
 - `server.py` — localhost web server and HTTPS API proxy
 - `start.bat` — Windows launcher
 - `docs/skills-reviewed.md` — UI/UX skill references reviewed and applied
+- `docs/qa-smoke-test.md` — interaction and save-flow smoke test results
 
 ## Important security note
 
