@@ -92,6 +92,7 @@ $("#providerForm").addEventListener("submit",e=>{
   if(!p.baseUrl||!p.apiKey){fb.className="feedback error";fb.textContent="Base URL and API Key are both required.";return;}
   try{if(new URL(p.baseUrl).protocol!=="https:")throw new Error("Use an HTTPS URL.");}
   catch(error){fb.className="feedback error";fb.textContent=error.message||"Enter a valid HTTPS Base URL.";return;}
+  const previousProviders=providers.slice();
   const previous=providers.findIndex(x=>x.id===p.id);
   if(previous>=0)providers[previous]=p;else providers.unshift(p);
   save.disabled=true;save.textContent="Saving…";
@@ -101,8 +102,9 @@ $("#providerForm").addEventListener("submit",e=>{
     $("#providerDialog").close();
     toast("Provider saved successfully");
   }catch(error){
-    if(previous>=0)providers[previous]=byId(p.id);else providers=providers.filter(x=>x.id!==p.id);
-    fb.className="feedback error";fb.textContent="Could not save in this browser. Check site storage permissions and available space.";
+    providers=previousProviders;
+    try{renderProviders();renderModels();}catch{}
+    fb.className="feedback error";fb.textContent="Could not save in this browser. Check site storage permissions and available space."
   }finally{save.disabled=false;save.textContent="Save provider";}
 });
 $("#chatForm").addEventListener("submit",e=>{e.preventDefault();const input=$("#messageInput"),s=input.value.trim();if(!s||busy)return;input.value="";input.style.height="auto";send(s)});
