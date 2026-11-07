@@ -74,7 +74,7 @@
         <div class="composer-area">
           <div class="attachment-row" id="attachmentRow"></div>
           <form class="composer" id="chatForm">
-            <textarea id="messageInput" rows="1" placeholder="Message Vibe Calling..." autocomplete="off"></textarea>
+            <textarea id="messageInput" name="message" aria-label="Message" rows="1" placeholder="Message Vibe Calling..." autocomplete="off"></textarea>
             <div class="composer-bottom">
               <div class="composer-tools">
                 <button type="button" class="tool-button" id="agentQuick"><span>✳</span> Tools <small id="toolState">off</small></button>
@@ -117,8 +117,8 @@
 
   <dialog id="providerDialog" class="modal" aria-labelledby="providerDialogTitle">
     <form id="providerForm">
-      <div class="modal-head"><div><div class="eyebrow"><span></span> API CONNECTION</div><h2 id="providerDialogTitle">Add a provider</h2></div><button type="button" class="close-button" data-close="providerDialog">×</button></div>
-      <label class="field-label">Provider preset</label>
+      <div class="modal-head"><div><div class="eyebrow"><span></span> API CONNECTION</div><h2 id="providerDialogTitle">Add a provider</h2></div><button type="button" class="close-button" data-close="providerDialog" aria-label="Close provider dialog">×</button></div>
+      <label for="providerPreset" class="field-label">Provider preset</label>
       <select id="providerPreset" class="field">
         <option value="custom">Custom / OpenAI-compatible</option>
         <option value="nvidia">NVIDIA NIM</option>
@@ -127,11 +127,11 @@
         <option value="openrouter">OpenRouter</option>
         <option value="groq">Groq</option>
       </select>
-      <label class="field-label">Display name</label><input id="providerName" class="field" placeholder="e.g. My NVIDIA account" required />
-      <label class="field-label">Base URL <span class="required">*</span></label><input id="providerUrl" class="field mono" placeholder="https://api.example.com/v1" required />
-      <label class="field-label">API Key <span class="required">*</span></label><div class="key-field"><input id="providerKey" class="field mono" type="password" placeholder="Paste your API key" required /><button type="button" id="toggleKey">Show</button></div>
-      <div class="field-row"><div><label class="field-label">Default model ID</label><input id="providerModel" class="field mono" placeholder="e.g. meta/llama-3.1-8b-instruct" /></div><div><label class="field-label">Custom header (optional)</label><input id="providerHeader" class="field mono" placeholder="Header-Name" /></div></div>
-      <label class="field-label">Custom header value (optional)</label><input id="providerHeaderValue" class="field mono" type="password" placeholder="Value sent with requests" />
+      <label for="providerName" class="field-label">Display name</label><input id="providerName" name="provider-name" class="field" autocomplete="off" placeholder="e.g. My NVIDIA account" required />
+      <label for="providerUrl" class="field-label">Base URL <span class="required">*</span></label><input id="providerUrl" name="provider-url" type="url" class="field mono" autocomplete="url" placeholder="https://api.example.com/v1" required />
+      <label for="providerKey" class="field-label">API Key <span class="required">*</span></label><div class="key-field"><input id="providerKey" name="provider-api-key" class="field mono" type="password" autocomplete="off" placeholder="Paste your API key" required /><button type="button" id="toggleKey">Show</button></div>
+      <div class="field-row"><div><label for="providerModel" class="field-label">Default model ID</label><input id="providerModel" name="provider-model" class="field mono" autocomplete="off" placeholder="e.g. meta/llama-3.1-8b-instruct" /></div><div><label for="providerHeader" class="field-label">Custom header (optional)</label><input id="providerHeader" name="custom-header" class="field mono" autocomplete="off" placeholder="Header-Name" /></div></div>
+      <label for="providerHeaderValue" class="field-label">Custom header value (optional)</label><input id="providerHeaderValue" name="custom-header-value" class="field mono" type="password" autocomplete="off" placeholder="Value sent with requests" />
       <div class="modal-note">Requests pass through the local Vibe Calling server on this computer, which forwards them to your provider. Your key is not stored by that server.</div>
       <div class="modal-actions"><button type="button" class="secondary-button" id="testProvider">Test connection</button><button type="submit" class="primary-button" id="saveProvider">Save provider</button></div>
       <div id="providerFeedback" class="feedback" role="status" aria-live="polite"></div>
@@ -139,7 +139,7 @@
   </dialog>
 
   <dialog id="confirmDialog" class="modal small-modal" aria-labelledby="confirmDialogTitle">
-    <div class="modal-head"><div><div class="eyebrow"><span></span> CONFIRM ACTION</div><h2 id="confirmDialogTitle">Clear local data?</h2></div><button class="close-button" data-close="confirmDialog">×</button></div>
+    <div class="modal-head"><div><div class="eyebrow"><span></span> CONFIRM ACTION</div><h2 id="confirmDialogTitle">Clear local data?</h2></div><button type="button" class="close-button" data-close="confirmDialog" aria-label="Close confirmation dialog">×</button></div>
     <p>This removes all providers, API keys, chats, and notes from this browser. This cannot be undone.</p>
     <div class="modal-actions"><button class="secondary-button" data-close="confirmDialog">Cancel</button><button class="danger-button" id="confirmClear">Delete everything</button></div>
   </dialog>
