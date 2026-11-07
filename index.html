@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0b0d14" />
+  <meta name="description" content="Vibe Calling — one workspace for all your AI models." />
+  <title>Vibe Calling</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><span></span><span></span><span></span></div>
+        <div><b>vibe<span>calling</span></b><small>YOUR AI WORKSPACE</small></div>
+      </div>
+      <button class="new-chat" id="newChatBtn"><span>＋</span> New conversation <kbd>⌘ K</kbd></button>
+      <div class="side-label">WORKSPACE</div>
+      <button class="nav-item active" data-view="chat"><span>◫</span> Chat <span class="nav-dot"></span></button>
+      <button class="nav-item" data-view="providers"><span>⌘</span> Providers <small id="providerCount">0</small></button>
+      <button class="nav-item" data-view="tools"><span>✳</span> Agent tools <small>LOCAL</small></button>
+      <div class="history-head"><span class="side-label">RECENT CHATS</span><button id="clearHistory" title="Clear history">···</button></div>
+      <div class="history-list" id="historyList"></div>
+      <div class="sidebar-bottom">
+        <div class="privacy-card"><span class="privacy-icon">◈</span><div><b>Your keys stay yours</b><small>Stored in this browser only.</small></div></div>
+        <button class="profile-button" id="settingsShortcut"><div class="avatar">V</div><div><b>Personal workspace</b><small>Local session</small></div><span>⚙</span></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobileMenu">☰</button>
+        <div class="breadcrumbs"><span>Workspace</span><i>/</i><b id="crumb">Chat</b></div>
+        <div class="top-actions">
+          <span class="secure-status"><i></i> LOCAL-FIRST</span>
+          <button class="icon-button" id="openSettings" title="Settings">⚙</button>
+        </div>
+      </header>
+
+      <section class="view active" id="chatView">
+        <div class="chat-toolbar">
+          <div class="model-select-wrap">
+            <span class="tiny-label">MODEL</span>
+            <select id="modelSelect" aria-label="Select model"><option value="">Add a provider first</option></select>
+            <span class="select-chevron">⌄</span>
+          </div>
+          <div class="toolbar-right">
+            <label class="agent-toggle"><input type="checkbox" id="agentToggle"><span class="toggle"></span><b>Agent mode</b><em>BETA</em></label>
+            <button class="icon-button" id="chatOptions" title="Chat options">···</button>
+          </div>
+        </div>
+
+        <div class="chat-content" id="chatContent">
+          <div class="welcome" id="welcome">
+            <div class="orb"><div class="orb-core"></div><i></i><i></i><i></i></div>
+            <div class="eyebrow"><span></span> ONE WORKSPACE. EVERY MODEL.</div>
+            <h1>What are we<br><span>building today?</span></h1>
+            <p>Bring your own API keys. Switch models freely.<br>Your AI setup, without the lock-in.</p>
+            <div class="suggestions">
+              <button class="suggestion" data-prompt="Explain how AI agents work, with a practical example."><span>✳</span><b>Explore an idea</b><small>Understand something new</small><i>↗</i></button>
+              <button class="suggestion" data-prompt="Help me plan and build a small web application step by step."><span>⌘</span><b>Build something</b><small>Plan a project with me</small><i>↗</i></button>
+              <button class="suggestion" data-prompt="Review this code and find bugs, edge cases, and improvements:"><span>{ }</span><b>Review code</b><small>Debug and improve</small><i>↗</i></button>
+            </div>
+            <button class="add-provider-cta" id="welcomeAddProvider">＋ Configure your first provider</button>
+          </div>
+          <div class="messages" id="messages"></div>
+        </div>
+
+        <div class="composer-area">
+          <div class="attachment-row" id="attachmentRow"></div>
+          <form class="composer" id="chatForm">
+            <textarea id="messageInput" rows="1" placeholder="Message Vibe Calling..." autocomplete="off"></textarea>
+            <div class="composer-bottom">
+              <div class="composer-tools">
+                <button type="button" class="tool-button" id="agentQuick"><span>✳</span> Tools <small id="toolState">off</small></button>
+                <span class="composer-hint">Enter to send · Shift + Enter for new line</span>
+              </div>
+              <div class="send-area"><span id="tokenHint">Bring your own API</span><button class="send-button" id="sendBtn" type="submit" aria-label="Send">↑</button></div>
+            </div>
+          </form>
+          <div class="disclaimer">Vibe Calling can make mistakes. Check important information. API usage may incur charges with your provider.</div>
+        </div>
+      </section>
+
+      <section class="view page-view" id="providersView">
+        <div class="page-heading"><div><div class="eyebrow"><span></span> CONNECTIONS</div><h1>Your providers<span>.</span></h1><p>Connect any OpenAI-compatible API endpoint.</p></div><button class="primary-button" id="addProviderBtn">＋ Add provider</button></div>
+        <div class="provider-grid" id="providerGrid"></div>
+        <div class="info-banner"><span>ⓘ</span><div><b>Compatibility note</b><p>Providers that expose the OpenAI-compatible Chat Completions API work best. Some providers use different authentication, model-list, or tool-calling behavior. You can always enter a model ID manually.</p></div></div>
+      </section>
+
+      <section class="view page-view" id="toolsView">
+        <div class="page-heading"><div><div class="eyebrow"><span></span> AGENT MODE</div><h1>Tools & abilities<span>.</span></h1><p>Small local tools the model can call when Agent mode is enabled.</p></div><span class="beta-pill">EXPERIMENTAL</span></div>
+        <div class="tools-grid">
+          <article class="tool-card"><div class="tool-card-icon">∑</div><div><h3>Calculator</h3><p>Evaluate basic arithmetic expressions locally.</p><span class="tool-status"><i></i> ENABLED</span></div></article>
+          <article class="tool-card"><div class="tool-card-icon">◷</div><div><h3>Current date & time</h3><p>Get the browser's local date and time.</p><span class="tool-status"><i></i> ENABLED</span></div></article>
+          <article class="tool-card"><div class="tool-card-icon">▤</div><div><h3>Workspace notes</h3><p>Save and retrieve notes in this browser.</p><span class="tool-status"><i></i> ENABLED</span></div></article>
+          <article class="tool-card disabled-tool"><div class="tool-card-icon">⌕</div><div><h3>Web search</h3><p>Not connected. Add a search API or backend to enable secure web search.</p><span class="tool-status muted">NOT CONFIGURED</span></div></article>
+        </div>
+        <div class="info-banner"><span>⚠</span><div><b>What Agent mode means here</b><p>The model may request the tools above, and this app runs those specific local actions. It does not have unrestricted access to your computer, files, terminal, or browser tabs. Tool calling must also be supported by the selected model/provider.</p></div></div>
+      </section>
+
+      <section class="view page-view" id="settingsView">
+        <div class="page-heading"><div><div class="eyebrow"><span></span> PREFERENCES</div><h1>Settings<span>.</span></h1><p>Manage this browser workspace.</p></div></div>
+        <div class="settings-panel">
+          <div class="setting-row"><div><b>Store API keys in this browser</b><p>Keys are saved in this browser on this device. The local proxy does not save or log them. Do not use this on a shared computer.</p></div><span class="setting-value">LOCAL STORAGE</span></div>
+          <div class="setting-row"><div><b>Clear all local data</b><p>Remove provider keys, chat history, and saved notes from this browser.</p></div><button class="danger-button" id="clearAll">Clear local data</button></div>
+          <div class="setting-row"><div><b>About Vibe Calling</b><p>A local bring-your-own-key AI chat workspace with a same-origin API proxy.</p></div><span class="setting-value">v0.1.0</span></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="providerDialog" class="modal">
+    <form id="providerForm" method="dialog">
+      <div class="modal-head"><div><div class="eyebrow"><span></span> API CONNECTION</div><h2 id="providerDialogTitle">Add a provider</h2></div><button type="button" class="close-button" data-close="providerDialog">×</button></div>
+      <label class="field-label">Provider preset</label>
+      <select id="providerPreset" class="field">
+        <option value="custom">Custom / OpenAI-compatible</option>
+        <option value="nvidia">NVIDIA NIM</option>
+        <option value="gemini">Google Gemini (OpenAI compatibility)</option>
+        <option value="openai">OpenAI</option>
+        <option value="openrouter">OpenRouter</option>
+        <option value="groq">Groq</option>
+      </select>
+      <label class="field-label">Display name</label><input id="providerName" class="field" placeholder="e.g. My NVIDIA account" required />
+      <label class="field-label">Base URL <span class="required">*</span></label><input id="providerUrl" class="field mono" placeholder="https://api.example.com/v1" required />
+      <label class="field-label">API Key <span class="required">*</span></label><div class="key-field"><input id="providerKey" class="field mono" type="password" placeholder="Paste your API key" required /><button type="button" id="toggleKey">Show</button></div>
+      <div class="field-row"><div><label class="field-label">Default model ID</label><input id="providerModel" class="field mono" placeholder="e.g. meta/llama-3.1-8b-instruct" /></div><div><label class="field-label">Custom header (optional)</label><input id="providerHeader" class="field mono" placeholder="Header-Name" /></div></div>
+      <label class="field-label">Custom header value (optional)</label><input id="providerHeaderValue" class="field mono" type="password" placeholder="Value sent with requests" />
+      <div class="modal-note">Requests pass through the local Vibe Calling server on this computer, which forwards them to your provider. Your key is not stored by that server.</div>
+      <div class="modal-actions"><button type="button" class="secondary-button" id="testProvider">Test connection</button><button type="submit" class="primary-button" id="saveProvider">Save provider</button></div>
+      <div id="providerFeedback" class="feedback" aria-live="polite"></div>
+    </form>
+  </dialog>
+
+  <dialog id="confirmDialog" class="modal small-modal">
+    <div class="modal-head"><div><div class="eyebrow"><span></span> CONFIRM ACTION</div><h2>Clear local data?</h2></div><button class="close-button" data-close="confirmDialog">×</button></div>
+    <p>This removes all providers, API keys, chats, and notes from this browser. This cannot be undone.</p>
+    <div class="modal-actions"><button class="secondary-button" data-close="confirmDialog">Cancel</button><button class="danger-button" id="confirmClear">Delete everything</button></div>
+  </dialog>
+  <div class="toast" id="toast"></div>
+  <script src="./app.js"></script>
+</body>
+</html>
