@@ -7,9 +7,10 @@ A lightweight local AI chat workspace for OpenAI-compatible providers, including
 1. Download the repository using **Code → Download ZIP** and extract it to a new folder.
 2. Double-click `start.bat`.
 3. Keep the server window open while using the app.
-4. Open `http://127.0.0.1:8765` if the browser does not open automatically.
-5. Open **Providers → Add provider**, enter your Base URL and API key, then use **Test connection** and **Save provider**.
-6. To verify the local server is using the correct extracted folder, open `http://127.0.0.1:8765/__health`.
+4. Keep the black server window open; it prints the exact local URL and opens it. If port 8765 is already occupied by an older server, this copy automatically uses the next available port.
+5. Open the `/__health` path on the exact URL printed in the black window to verify the correct copy is running.
+6. Open **Providers → Add provider**, enter your Base URL and API key, then use **Test connection** and **Save provider**.
+
 
 For NVIDIA NIM, use `https://integrate.api.nvidia.com/v1`.
 
