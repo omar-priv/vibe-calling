@@ -9,6 +9,7 @@ A lightweight local AI chat workspace for OpenAI-compatible providers, including
 3. Keep the server window open while using the app.
 4. Open `http://127.0.0.1:8765` if the browser does not open automatically.
 5. Open **Providers → Add provider**, enter your Base URL and API key, then use **Test connection** and **Save provider**.
+6. To verify the local server is using the correct extracted folder, open `http://127.0.0.1:8765/__health`.
 
 For NVIDIA NIM, use `https://integrate.api.nvidia.com/v1`.
 
