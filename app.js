@@ -69,4 +69,6 @@ $("#messageInput").addEventListener("input",e=>{e.target.style.height="auto";e.t
 $("#agentToggle").addEventListener("change",e=>{$("#toolState").textContent=e.target.checked?"on":"off"});
 function init(){try{renderProviders();renderModels();renderHistory();renderChat();console.info("Vibe Calling initialized")}catch(e){fatal(e.stack||e.message||String(e))}}
 init();
+window.__vibeAppReady = true;
+document.documentElement.dataset.vibeApp = 'ready';
 })();
