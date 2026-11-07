@@ -213,11 +213,20 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
-    try:
-        server = ThreadingHTTPServer((HOST, PORT), Handler)
-    except OSError as exc:
-        print(f"Could not start Vibe Calling on {HOST}:{PORT}: {exc}")
-        print("Close any other app using port 8765, then run start.bat again.")
+    global PORT
+    server = None
+    last_error = None
+    # If an older Vibe Calling window is still running on 8765, launch this
+    # copy on the next free localhost port instead of silently reusing the old UI.
+    for candidate in range(PORT, PORT + 25):
+        try:
+            PORT = candidate
+            server = ThreadingHTTPServer((HOST, PORT), Handler)
+            break
+        except OSError as exc:
+            last_error = exc
+    if server is None:
+        print(f"Could not start Vibe Calling on ports 8765–{PORT}: {last_error}")
         input("Press Enter to close...")
         return 1
     print("Vibe Calling is running locally:")
