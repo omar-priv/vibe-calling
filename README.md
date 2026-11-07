@@ -6,11 +6,9 @@ A lightweight local AI chat workspace for OpenAI-compatible providers, including
 
 1. Download the repository using **Code → Download ZIP** and extract it to a new folder.
 2. Double-click `start.bat`.
-3. Keep the server window open while using the app.
-4. Keep the black server window open; it prints the exact local URL and opens it. If port 8765 is already occupied by an older server, this copy automatically uses the next available port.
-5. Open the `/__health` path on the exact URL printed in the black window to verify the correct copy is running.
-6. Open **Providers → Add provider**, enter your Base URL and API key, then use **Test connection** and **Save provider**.
-
+3. Keep the black server window open. It prints the exact local URL and opens it in your browser. If port 8765 is occupied by an older server, this copy automatically uses the next available port.
+4. To confirm the correct copy is running, append `/__health` to the exact URL printed in that black window. The page should return JSON with `"status": "ok"` and the project files.
+5. Open **Providers → Add provider**, enter your Base URL and API key, then use **Test connection** and **Save provider**.
 
 For NVIDIA NIM, use `https://integrate.api.nvidia.com/v1`.
 
@@ -26,13 +24,13 @@ For NVIDIA NIM, use `https://integrate.api.nvidia.com/v1`.
 
 ## Files
 
-- `index.html` — app interface and provider dialog
-- `styles.css` — visual system, responsive layout, and interaction states
-- `app.js` — chat, provider, and local tool logic
-- `server.py` — localhost web server and HTTPS API proxy
-- `start.bat` — Windows launcher
-- `docs/skills-reviewed.md` — UI/UX skill references reviewed and applied
-- `docs/qa-smoke-test.md` — interaction and save-flow smoke test results
+- `index.html` — app interface, provider dialog, and embedded app bundle (the page does not need to fetch a separate JavaScript file).
+- `styles.css` — visual system, responsive layout, and interaction states.
+- `app.js` — editable source copy of the chat, provider, and local tool logic.
+- `server.py` — localhost web server and HTTPS API proxy.
+- `start.bat` — Windows launcher.
+- `docs/skills-reviewed.md` — UI/UX skill references reviewed and applied.
+- `docs/qa-smoke-test.md` — interaction and save-flow smoke test results.
 
 ## Important security note
 
