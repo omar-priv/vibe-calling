@@ -7,7 +7,7 @@ const presets={custom:{name:"Custom provider",url:"",model:""},nvidia:{name:"NVI
 const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
 let providers=read(KEYS.providers,[]),chats=read(KEYS.chats,[]),notes=read(KEYS.notes,[]);
 if(!Array.isArray(providers))providers=[];if(!Array.isArray(chats))chats=[];if(!Array.isArray(notes))notes=[];
-let chatId=chats[0]?.id||null,editingId=null,busy=false,controller=null;
+let chatId=chats[0]?.id||null,editingId=null,busy=false,controller=null,pendingModels=[];
 const uid=()=>globalThis.crypto?.randomUUID?.()||("vc-"+Date.now()+"-"+Math.random().toString(36).slice(2));
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function toast(s){const el=$("#toast");if(!el){console.log(s);return}el.textContent=s;el.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove("show"),3000)}
@@ -25,13 +25,28 @@ function renderModels(preferred){const el=$("#modelSelect"),old=preferred||el.va
 function renderProviders(){const grid=$("#providerGrid");if(!grid)return;if(!providers.length){grid.innerHTML='<div class="empty-state">No providers connected yet.<br><br>Add NVIDIA, Gemini, OpenAI, Groq, OpenRouter, or a compatible endpoint.</div>';return}grid.innerHTML=providers.map(p=>{let host="Custom endpoint";try{host=new URL(p.baseUrl).hostname}catch{}return '<article class="provider-card"><div class="provider-card-head"><div class="provider-logo">'+esc((p.name||"P").slice(0,1).toUpperCase())+'</div><div><h3>'+esc(p.name||"Provider")+'</h3><small>'+esc(host)+'</small></div></div><div class="provider-model">'+esc(p.models?.length?p.models.length+" models available":p.defaultModel||"No model selected")+'</div><div class="provider-card-actions"><button type="button" data-edit="'+esc(p.id)+'">Edit</button><button type="button" data-refresh="'+esc(p.id)+'">Refresh models</button><button type="button" class="delete-provider" data-delete="'+esc(p.id)+'">Delete</button></div></article>'}).join("")}
 function markdown(s){let x=esc(s);const fence=String.fromCharCode(96).repeat(3);x=x.replace(new RegExp(fence+"([\\w-]*)\\n([\\s\\S]*?)"+fence,"g"),(_,l,c)=>"<pre><code>"+c+"</code></pre>");x=x.replace(/^### (.*)$/gm,"<h3>$1</h3>").replace(/^## (.*)$/gm,"<h2>$1</h2>").replace(/^# (.*)$/gm,"<h1>$1</h1>").replace(/\*\*(.*?)\*\*/g,"<b>$1</b>");return x.split(/\n{2,}/).map(p=>p.startsWith("<pre>")||p.startsWith("<h")?p:"<p>"+p.replace(/\n/g,"<br>")+"</p>").join("")}
 function renderChat(){const box=$("#messages"),welcome=$("#welcome"),c=current();if(!c){box.innerHTML="";welcome.style.display="block";return}const arr=Array.isArray(c.messages)?c.messages:[];welcome.style.display=arr.length?"none":"block";box.innerHTML=arr.map((m,i)=>{const user=m.role==="user";return '<article class="message '+(user?"user":"assistant")+'"><div class="message-avatar">'+(user?"Y":"✳")+'</div><div class="message-body"><div class="message-content">'+markdown(m.content||"")+'</div>'+(m.toolLog?'<div class="tool-log">'+esc(m.toolLog)+'</div>':"")+'<div class="message-meta">'+(user?"YOU":"VIBE CALLING")+(m.model?" · "+esc(m.model):"")+'</div>'+(user?"":'<div class="message-actions"><button type="button" data-copy="'+esc(m.content||"")+'">Copy</button><button type="button" data-retry="'+i+'">Regenerate</button></div>')+'</div></article>'}).join("");$("#chatContent").scrollTo(0,$("#chatContent").scrollHeight)}
-function openProvider(providerId){editingId=providerId||null;const p=providerId?byId(providerId):null;$("#providerDialogTitle").textContent=p?"Edit provider":"Add a provider";$("#providerPreset").value="custom";$("#providerName").value=p?.name||"";$("#providerUrl").value=p?.baseUrl||"";$("#providerKey").value=p?.apiKey||"";$("#providerModel").value=p?.defaultModel||"";$("#providerHeader").value=p?.customHeader||"";$("#providerHeaderValue").value=p?.customHeaderValue||"";$("#providerFeedback").textContent="";$("#providerFeedback").className="feedback";$("#providerDialog").showModal()}
-function providerFromForm(){return{id:editingId||uid(),name:$("#providerName").value.trim()||"My provider",baseUrl:cleanUrl($("#providerUrl").value),apiKey:$("#providerKey").value.trim(),defaultModel:$("#providerModel").value.trim(),models:editingId?(byId(editingId)?.models||[]):[],customHeader:$("#providerHeader").value.trim(),customHeaderValue:$("#providerHeaderValue").value}}
+function openProvider(providerId){pendingModels=[];editingId=providerId||null;const p=providerId?byId(providerId):null;$("#providerDialogTitle").textContent=p?"Edit provider":"Add a provider";$("#providerPreset").value="custom";$("#providerName").value=p?.name||"";$("#providerUrl").value=p?.baseUrl||"";$("#providerKey").value=p?.apiKey||"";$("#providerModel").value=p?.defaultModel||"";$("#providerHeader").value=p?.customHeader||"";$("#providerHeaderValue").value=p?.customHeaderValue||"";$("#providerFeedback").textContent="";$("#providerFeedback").className="feedback";$("#providerDialog").showModal()}
+function providerFromForm(){return{id:editingId||uid(),name:$("#providerName").value.trim()||"My provider",baseUrl:cleanUrl($("#providerUrl").value),apiKey:$("#providerKey").value.trim(),defaultModel:$("#providerModel").value.trim(),models:pendingModels.length?pendingModels:(editingId?(byId(editingId)?.models||[]):[]),customHeader:$("#providerHeader").value.trim(),customHeaderValue:$("#providerHeaderValue").value}}
 function requestBody(p,path,method,body){return{baseUrl:cleanUrl(p.baseUrl),path,method,apiKey:p.apiKey,customHeader:p.customHeader||"",customHeaderValue:p.customHeaderValue||"",body:body??null}}
 async function api(p,path,method="GET",body=null,signal){let r;try{r=await fetch("/api/proxy",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(requestBody(p,path,method,body)),signal})}catch(e){if(e.name==="AbortError")throw e;throw new Error("Could not reach local server. Run start.bat and open http://127.0.0.1:8765")}const raw=await r.text();if(!r.ok)throw new Error("HTTP "+r.status+": "+raw.slice(0,450));try{return raw?JSON.parse(raw):{}}catch{throw new Error("Provider response is not valid JSON")}}
 async function discover(p){const d=await api(p,"/models");return(d.data||d.models||[]).map(x=>x.id||x.name).filter(Boolean)}
 async function refresh(id){const p=byId(id);if(!p)return;toast("Fetching models…");try{p.models=await discover(p);saveProviders();toast("Loaded "+p.models.length+" models")}catch(e){toast("Model list failed: "+e.message)}}
-async function testProvider(){const p=providerFromForm(),fb=$("#providerFeedback");fb.className="feedback";fb.textContent="Testing connection…";try{const list=await discover(p);p.models=list;fb.textContent="Connected through local proxy. "+list.length+" model(s) discovered.";if(list.length&&!p.defaultModel)$("#providerModel").value=list[0]}catch(e){fb.className="feedback error";fb.textContent="Connection failed: "+e.message+" — You can still enter a model ID manually."}}
+async function testProvider(){
+  const p=providerFromForm(),fb=$("#providerFeedback"),button=$("#testProvider");
+  fb.className="feedback";fb.textContent="";
+  if(!p.baseUrl||!p.apiKey){fb.className="feedback error";fb.textContent="Enter both Base URL and API Key before testing.";return;}
+  try{if(new URL(p.baseUrl).protocol!=="https:")throw new Error("Base URL must start with https://");}
+  catch(e){fb.className="feedback error";fb.textContent=e.message==="Base URL must start with https://" ? e.message : "Enter a valid HTTPS Base URL.";return;}
+  const label=button.textContent;button.disabled=true;button.textContent="Testing…";button.classList.add("is-loading");
+  fb.textContent="Contacting provider through your local proxy…";
+  try{
+    const list=await discover(p);pendingModels=list;p.models=list;
+    fb.className="feedback success";
+    fb.textContent="Connected successfully. "+list.length+" model(s) found.";
+    if(list.length&&!p.defaultModel)$("#providerModel").value=list[0];
+  }catch(e){fb.className="feedback error";fb.textContent="Connection failed: "+e.message+" You can still save the provider and enter a model ID manually.";}
+  finally{button.disabled=false;button.textContent=label;button.classList.remove("is-loading");}
+}
 function addMessage(role,content,extra={}){const c=current();if(!c)return;c.messages.push({role,content,...extra});if(role==="user"&&c.title==="New conversation")c.title=content.slice(0,42)+(content.length>42?"…":"");saveChats();renderChat()}
 function selected(){const v=$("#modelSelect").value,i=v.indexOf("::");return i<0?{}:{provider:byId(v.slice(0,i)),model:v.slice(i+2)}}
 function calculate(expr){if(!/^[\d\s.+\-*/()%]+$/.test(expr)||!expr.trim())throw Error("Invalid expression");const ts=expr.match(/\d+(?:\.\d+)?|[()+\-*/%]/g)||[];if(ts.join("")!==expr.replace(/\s/g,""))throw Error("Invalid expression");const out=[],ops=[],pr={"+":1,"-":1,"*":2,"/":2,"%":2};let prev="start";for(const t of ts){if(/^\d/.test(t)){if(prev==="number"||prev===")")throw Error("Invalid expression");out.push(Number(t));prev="number"}else if(t==="("){if(prev==="number"||prev===")")throw Error("Invalid expression");ops.push(t);prev="("}else if(t===")"){while(ops.length&&ops.at(-1)!=="(")out.push(ops.pop());if(ops.pop()!=="(")throw Error("Mismatched parentheses");prev=")"}else{if(prev!=="number"&&prev!==")"){if((t==="-"||t==="+")&&["start","(","operator"].includes(prev))out.push(0);else throw Error("Invalid expression")}while(ops.length&&pr[ops.at(-1)]>=pr[t])out.push(ops.pop());ops.push(t);prev="operator"}}while(ops.length){const op=ops.pop();if(op==="(")throw Error("Mismatched parentheses");out.push(op)}const st=[];for(const t of out){if(typeof t==="number")st.push(t);else{const b=st.pop(),a=st.pop();st.push(t==="+"?a+b:t==="-"?a-b:t==="*"?a*b:t==="/"?a/b:a%b)}}if(st.length!==1||!Number.isFinite(st[0]))throw Error("Invalid result");return String(st[0])}
@@ -39,6 +54,14 @@ const tools=[{type:"function",function:{name:"calculator",description:"Calculate
 async function runTool(name,a){if(name==="calculator")return calculate(a.expression||"");if(name==="get_current_datetime")return new Date().toLocaleString();if(name==="save_note"){notes.unshift({id:uid(),title:String(a.title||"Note"),content:String(a.content||"")});write(KEYS.notes,notes);return"Note saved locally"}if(name==="list_notes")return notes.map(n=>"- "+n.title+": "+n.content).join("\n")||"No notes";throw Error("Unknown tool")}
 async function send(text){if(busy)return;const q=selected();if(!q.provider||!q.model){toast("Connect a provider and set a model ID first.");if(!providers.length)openProvider();else setView("providers");return}if(!chatId)newChat();addMessage("user",text);busy=true;$("#sendBtn").disabled=true;$("#messageInput").disabled=true;controller=new AbortController();const spinner=document.createElement("div");spinner.className="typing";spinner.innerHTML="<i></i><i></i><i></i>";$("#messages").appendChild(spinner);$("#welcome").style.display="none";try{const history=current().messages.map(m=>({role:m.role,content:m.content}));let answer="",used=[];for(let n=0;n<6;n++){const body={model:q.model,messages:history,temperature:.7,stream:false};if($("#agentToggle").checked){body.tools=tools;body.tool_choice="auto"}const res=await api(q.provider,"/chat/completions","POST",body,controller.signal),msg=res.choices?.[0]?.message;if(!msg)throw Error(res.error?.message||"Empty response from provider");if(msg.tool_calls?.length&&$("#agentToggle").checked){history.push(msg);for(const c of msg.tool_calls){let args={};try{args=JSON.parse(c.function.arguments||"{}")}catch{}let value;try{value=await runTool(c.function.name,args);used.push(c.function.name+" ✓")}catch(e){value="Tool error: "+e.message;used.push(c.function.name+" failed")}history.push({role:"tool",tool_call_id:c.id,name:c.function.name,content:String(value)})}continue}answer=msg.content||"";break}spinner.remove();addMessage("assistant",answer||"The model returned no final text.",{model:q.model,toolLog:used.length?"Tools used: "+used.join(" · "):""})}catch(e){spinner.remove();addMessage("assistant",e.name==="AbortError"?"Request stopped.":"**Request failed**\n\n"+e.message+"\n\nCheck Base URL, API key, model ID and provider compatibility.",{model:q.model})}finally{busy=false;controller=null;$("#sendBtn").disabled=false;$("#messageInput").disabled=false;$("#messageInput").focus()}}
 function retry(index){const c=current();if(!c||busy)return;const u=c.messages.slice(0,index).reverse().find(m=>m.role==="user");if(!u)return;c.messages=c.messages.slice(0,index);if(c.messages.at(-1)?.role==="user")c.messages.pop();saveChats();renderChat();send(u.content)}
+document.addEventListener("click",e=>{
+  const button=e.target.closest("button");
+  if(!button||button.disabled)return;
+  button.classList.remove("tap-feedback");
+  void button.offsetWidth;
+  button.classList.add("tap-feedback");
+  window.setTimeout(()=>button.classList.remove("tap-feedback"),320);
+},{capture:true});
 document.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
 if(b.id==="newChatBtn"){newChat();return}
 if(b.id==="welcomeAddProvider"||b.id==="addProviderBtn"){openProvider();return}
@@ -62,7 +85,26 @@ if(b.dataset.retry!==undefined){retry(Number(b.dataset.retry));return}
 if(b.dataset.prompt){$("#messageInput").value=b.dataset.prompt;$("#messageInput").focus();return}
 });
 $("#providerPreset").addEventListener("change",()=>{const p=presets[$("#providerPreset").value];if(p){$("#providerName").value=p.name;$("#providerUrl").value=p.url;$("#providerModel").value=p.model}});
-$("#providerForm").addEventListener("submit",e=>{e.preventDefault();const p=providerFromForm();if(!p.baseUrl||!p.apiKey){$("#providerFeedback").className="feedback error";$("#providerFeedback").textContent="Base URL and API key are required.";return}try{if(new URL(p.baseUrl).protocol!=="https:")throw Error()}catch{$("#providerFeedback").className="feedback error";$("#providerFeedback").textContent="Enter a valid HTTPS URL.";return}if(editingId)providers=providers.map(x=>x.id===p.id?p:x);else providers.unshift(p);write(KEYS.providers,providers);$("#providerDialog").close();saveProviders();renderModels(p.defaultModel?p.id+"::"+p.defaultModel:undefined);toast("Provider saved")});
+$("#providerForm").addEventListener("submit",e=>{
+  e.preventDefault();
+  const p=providerFromForm(),fb=$("#providerFeedback"),save=$("#saveProvider");
+  fb.className="feedback";fb.textContent="";
+  if(!p.baseUrl||!p.apiKey){fb.className="feedback error";fb.textContent="Base URL and API Key are both required.";return;}
+  try{if(new URL(p.baseUrl).protocol!=="https:")throw new Error("Use an HTTPS URL.");}
+  catch(error){fb.className="feedback error";fb.textContent=error.message||"Enter a valid HTTPS Base URL.";return;}
+  const previous=providers.findIndex(x=>x.id===p.id);
+  if(previous>=0)providers[previous]=p;else providers.unshift(p);
+  save.disabled=true;save.textContent="Saving…";
+  try{
+    saveProviders();
+    renderModels(p.defaultModel?p.id+"::"+p.defaultModel:undefined);
+    $("#providerDialog").close();
+    toast("Provider saved successfully");
+  }catch(error){
+    if(previous>=0)providers[previous]=byId(p.id);else providers=providers.filter(x=>x.id!==p.id);
+    fb.className="feedback error";fb.textContent="Could not save in this browser. Check site storage permissions and available space.";
+  }finally{save.disabled=false;save.textContent="Save provider";}
+});
 $("#chatForm").addEventListener("submit",e=>{e.preventDefault();const input=$("#messageInput"),s=input.value.trim();if(!s||busy)return;input.value="";input.style.height="auto";send(s)});
 $("#messageInput").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("#chatForm").requestSubmit()}});
 $("#messageInput").addEventListener("input",e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,180)+"px"});
