@@ -31,3 +31,12 @@ The current `app.js` was syntax-compiled. The page's inline diagnostic scripts w
 - Streaming, image/file uploads, speech, or web search (not part of the current implementation).
 
 The provider request in this smoke test used a mocked successful response. It proves the frontend event wiring and save flow in the isolated harness; it does **not** prove live provider credentials or internet connectivity.
+
+
+## 2026-11-07 — Static JavaScript load fix
+
+- Removed the external `app.js` network request from the HTML page. The app bundle is embedded directly in `index.html`, so the browser no longer needs to fetch the separate JavaScript file or negotiate its MIME type.
+- Kept `app.js` as a source copy; the embedded bundle was copied from it and syntax-compiled.
+- Added explicit JS/CSS/HTML MIME types to the local server for browsers that still request standalone assets.
+- Added a local `/__health` endpoint to report whether the server's extracted folder contains the expected project files.
+- The HTML now contains no emergency-mode fallback banner and no external JavaScript script tag.
