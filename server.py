@@ -84,12 +84,34 @@ class Handler(SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
-        # Always revalidate the app shell and its JS/CSS so a stale bundle
-        # cannot leave the browser on an obsolete emergency-only interface.
+        # Always revalidate the app shell and assets so the browser cannot
+        # keep an obsolete version after an update.
         if urlsplit(self.path).path in {"", "/", "/index.html", "/app.js", "/styles.css"}:
             self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
             self.send_header("Pragma", "no-cache")
         super().end_headers()
+
+    def guess_type(self, path):
+        # Windows MIME registries can return an unsuitable JavaScript type.
+        # Explicit types avoid browser nosniff rejections.
+        suffix = Path(urlsplit(path).path).suffix.lower()
+        if suffix == ".js":
+            return "application/javascript; charset=utf-8"
+        if suffix == ".css":
+            return "text/css; charset=utf-8"
+        if suffix in {".html", ".htm"}:
+            return "text/html; charset=utf-8"
+        return super().guess_type(path)
+
+    def do_GET(self):
+        if urlsplit(self.path).path == "/__health":
+            files = {}
+            for name in ("index.html", "app.js", "styles.css"):
+                target = ROOT / name
+                files[name] = {"exists": target.is_file(), "bytes": target.stat().st_size if target.is_file() else 0}
+            self.send_json(200, {"status": "ok", "root": ROOT.name, "files": files, "bundle": "inline"})
+            return
+        super().do_GET()
 
     def do_POST(self):
         if self.path != "/api/proxy":
