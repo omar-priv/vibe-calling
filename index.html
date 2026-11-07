@@ -9,9 +9,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=c1e860ef670a" />
 </head>
 <body>
+  <a class="skip-link" href="#mainContent">Skip to main content</a>
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
       <div class="brand">
@@ -23,7 +24,7 @@
       <button class="nav-item active" data-view="chat"><span>◫</span> Chat <span class="nav-dot"></span></button>
       <button class="nav-item" data-view="providers"><span>⌘</span> Providers <small id="providerCount">0</small></button>
       <button class="nav-item" data-view="tools"><span>✳</span> Agent tools <small>LOCAL</small></button>
-      <div class="history-head"><span class="side-label">RECENT CHATS</span><button id="clearHistory" title="Clear history">···</button></div>
+      <div class="history-head"><span class="side-label">RECENT CHATS</span><button type="button" id="clearHistory" title="Clear history" aria-label="Clear chat history">···</button></div>
       <div class="history-list" id="historyList"></div>
       <div class="sidebar-bottom">
         <div class="privacy-card"><span class="privacy-icon">◈</span><div><b>Your keys stay yours</b><small>Stored in this browser only.</small></div></div>
@@ -31,13 +32,13 @@
       </div>
     </aside>
 
-    <main class="main">
+    <main class="main" id="mainContent" tabindex="-1">
       <header class="topbar">
-        <button class="mobile-menu" id="mobileMenu">☰</button>
+        <button type="button" class="mobile-menu" id="mobileMenu" aria-label="Open navigation">☰</button>
         <div class="breadcrumbs"><span>Workspace</span><i>/</i><b id="crumb">Chat</b></div>
         <div class="top-actions">
           <span class="build-mark">CLICK FIX · 07 NOV</span><span class="secure-status"><i></i> LOCAL-FIRST</span>
-          <button class="icon-button" id="openSettings" title="Settings">⚙</button>
+          <button type="button" class="icon-button" id="openSettings" title="Settings" aria-label="Open settings">⚙</button>
         </div>
       </header>
 
@@ -50,7 +51,7 @@
           </div>
           <div class="toolbar-right">
             <label class="agent-toggle"><input type="checkbox" id="agentToggle"><span class="toggle"></span><b>Agent mode</b><em>BETA</em></label>
-            <button class="icon-button" id="chatOptions" title="Chat options">···</button>
+            <button type="button" class="icon-button" id="chatOptions" title="Chat options" aria-label="Chat options">···</button>
           </div>
         </div>
 
@@ -114,7 +115,7 @@
     </main>
   </div>
 
-  <dialog id="providerDialog" class="modal">
+  <dialog id="providerDialog" class="modal" aria-labelledby="providerDialogTitle">
     <form id="providerForm" method="dialog">
       <div class="modal-head"><div><div class="eyebrow"><span></span> API CONNECTION</div><h2 id="providerDialogTitle">Add a provider</h2></div><button type="button" class="close-button" data-close="providerDialog">×</button></div>
       <label class="field-label">Provider preset</label>
@@ -133,62 +134,35 @@
       <label class="field-label">Custom header value (optional)</label><input id="providerHeaderValue" class="field mono" type="password" placeholder="Value sent with requests" />
       <div class="modal-note">Requests pass through the local Vibe Calling server on this computer, which forwards them to your provider. Your key is not stored by that server.</div>
       <div class="modal-actions"><button type="button" class="secondary-button" id="testProvider">Test connection</button><button type="submit" class="primary-button" id="saveProvider">Save provider</button></div>
-      <div id="providerFeedback" class="feedback" aria-live="polite"></div>
+      <div id="providerFeedback" class="feedback" role="status" aria-live="polite"></div>
     </form>
   </dialog>
 
-  <dialog id="confirmDialog" class="modal small-modal">
-    <div class="modal-head"><div><div class="eyebrow"><span></span> CONFIRM ACTION</div><h2>Clear local data?</h2></div><button class="close-button" data-close="confirmDialog">×</button></div>
+  <dialog id="confirmDialog" class="modal small-modal" aria-labelledby="confirmDialogTitle">
+    <div class="modal-head"><div><div class="eyebrow"><span></span> CONFIRM ACTION</div><h2 id="confirmDialogTitle">Clear local data?</h2></div><button class="close-button" data-close="confirmDialog">×</button></div>
     <p>This removes all providers, API keys, chats, and notes from this browser. This cannot be undone.</p>
     <div class="modal-actions"><button class="secondary-button" data-close="confirmDialog">Cancel</button><button class="danger-button" id="confirmClear">Delete everything</button></div>
   </dialog>
   <div class="toast" id="toast"></div>
-  <script src="./app.js?v=f348a1ed"></script>
+    <div id="bootError" hidden role="alert" style="position:fixed;z-index:99999;left:12px;right:12px;top:12px;padding:12px 14px;background:#4a1d27;color:#fff;border:1px solid #a74d5a;border-radius:8px;font:12px/1.5 system-ui"></div>
   <script>
-  (() => {
-    if (window.__vibeAppReady) return;
-    document.documentElement.dataset.vibeFallback = "active";
-    const warn = document.createElement("div");
-    warn.textContent = "Vibe Calling is using emergency UI mode. Refresh or re-download the latest version.";
-    warn.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:99999;background:#573d16;color:#fff;padding:7px 12px;text-align:center;font:12px system-ui";
-    document.body.appendChild(warn);
-    document.addEventListener("click", (event) => {
-      const button = event.target.closest("button");
-      if (!button) return;
-      const show = (name) => {
-        document.querySelectorAll(".view").forEach(v => v.classList.remove("active"));
-        document.getElementById(name + "View")?.classList.add("active");
-        document.querySelectorAll(".nav-item").forEach(v => v.classList.toggle("active", v.dataset.view === name));
-        const crumb = document.getElementById("crumb");
-        if (crumb) crumb.textContent = ({chat:"Chat",providers:"Providers",tools:"Agent tools",settings:"Settings"})[name] || name;
-        document.getElementById("sidebar")?.classList.remove("open");
-      };
-      if (button.dataset.view) { show(button.dataset.view); return; }
-      if (button.id === "newChatBtn") {
-        const box = document.getElementById("messages");
-        const welcome = document.getElementById("welcome");
-        if (box) box.innerHTML = "";
-        if (welcome) welcome.style.display = "block";
-        show("chat"); document.getElementById("messageInput")?.focus(); return;
-      }
-      if (button.id === "welcomeAddProvider" || button.id === "addProviderBtn") {
-        document.getElementById("providerDialog")?.showModal(); return;
-      }
-      if (button.id === "openSettings" || button.id === "settingsShortcut") { show("settings"); return; }
-      if (button.id === "mobileMenu") { document.getElementById("sidebar")?.classList.toggle("open"); return; }
-      if (button.id === "agentQuick") {
-        const toggle = document.getElementById("agentToggle");
-        if (toggle) { toggle.checked = !toggle.checked; document.getElementById("toolState").textContent = toggle.checked ? "on" : "off"; }
-        return;
-      }
-      if (button.dataset.prompt) {
-        const input = document.getElementById("messageInput");
-        if (input) { input.value = button.dataset.prompt; input.focus(); }
-        return;
-      }
-      if (button.dataset.close) { document.getElementById(button.dataset.close)?.close(); return; }
-    }, true);
-  })();
+    window.addEventListener("error", function(event) {
+      if (!event.filename || !event.filename.includes("app.js")) return;
+      const box = document.getElementById("bootError");
+      box.hidden = false;
+      box.textContent = "Vibe Calling failed to start: " + event.message + " (line " + event.lineno + ").";
+    });
   </script>
+  <script src="./app.js?v=14210bfdaa1e" onerror="const box=document.getElementById('bootError');box.hidden=false;box.textContent='Could not load app.js. Check that start.bat is running and reload the page.';"></script>
+  <script>
+    if (!window.__vibeAppReady) {
+      const box = document.getElementById("bootError");
+      if (box.hidden) {
+        box.hidden = false;
+        box.textContent = "The app script loaded but did not finish initializing. Reload this page; if it repeats, send a screenshot of this message.";
+      }
+    }
+  </script>
+
 </body>
 </html>
