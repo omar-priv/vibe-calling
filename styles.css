@@ -77,3 +77,76 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { border-color
   .skip-link { left: 8px; top: 8px; }
   button { min-height: 34px; }
 }
+
+
+/* Visual direction: Night Workshop — charcoal surfaces, citron actions, mint system status. */
+:root {
+  --bg: #0a100c;
+  --panel: #111a14;
+  --panel2: #17231a;
+  --line: #29382c;
+  --muted: #899a8c;
+  --text: #edf4e9;
+  --purple: #c5e879;
+  --cyan: #70d8c4;
+  --danger: #ff818a;
+}
+body {
+  background:
+    radial-gradient(ellipse at 78% -16%, #1b3020 0, transparent 42%),
+    radial-gradient(ellipse at 10% 100%, #10241e 0, transparent 40%),
+    var(--bg);
+}
+.sidebar { background: #0c140f; border-color: #243328; }
+.brand-mark { border-color: #617744; background: #1a291b; }
+.brand-mark span:nth-child(2) { background: var(--cyan); }
+.new-chat { border-color: #586f3b; background: linear-gradient(110deg,#27371d,#18281e); }
+.new-chat span, .nav-item>span:first-child { color: var(--purple); }
+.nav-item.active { background: #1c2a1e; color: #f1f6e9; }
+.nav-item:hover { background: #19271c; }
+.privacy-card { border-color: #304636; background: #121e17; }
+.privacy-icon, .message.assistant .message-avatar { color: var(--cyan); }
+.avatar, .provider-logo, .tool-card-icon { background: #27351e; color: var(--purple); }
+.main { background: transparent; }
+.topbar, .chat-toolbar { border-color: #26342a; }
+.icon-button, .mobile-menu, .model-select-wrap select {
+  background: #121c15; border-color: #304334; color: #dce9d8;
+}
+.orb { border-color: #6b8246; background: radial-gradient(circle,#243a24,#121e16 65%,transparent 68%); }
+.orb-core { background: linear-gradient(140deg,#d8f18a,#65d7c4); box-shadow: 0 0 22px #b8df6a55; }
+.orb i { border-color: #849d5c; }
+.orb i:nth-of-type(3) { border-color: #536d48; }
+.eyebrow { color: #b5cb91; }
+.welcome h1 span, .page-heading h1 span {
+  background: linear-gradient(100deg,#d0eb82,#71d9c5);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.suggestion, .provider-card, .tool-card, .settings-panel {
+  border-color: #2a3b2e; background: #111b14;
+}
+.suggestion:hover, .provider-card:hover { border-color: #819b4e; background: #17251a; }
+.suggestion>span { color: var(--purple); }
+.suggestion small, .provider-card small { color: #91a393; }
+.composer { border-color: #3b523c; background: #111b15; }
+.composer:focus-within { border-color: #99bb5e; box-shadow: 0 0 0 3px #b8d96a12; }
+.composer textarea { color: #edf4e9; }
+.tool-button { background: #1a281d; border-color: #3a4c38; }
+.tool-button span { color: var(--purple); }
+.primary-button, .send-button {
+  background: linear-gradient(120deg,#d2ec83,#71d6c2);
+  color: #10170f;
+}
+.info-banner { border-color: #3b5037; background: #172319; color: #c6e879; }
+.info-banner b { color: #e8f3d9; }
+.info-banner p { color: #a6b7a7; }
+.field { background: #0c1510; border-color: #334638; color: #f0f5eb; }
+.field:focus { border-color: #a5c969; }
+.modal { background: #121d16; border-color: #3b4c3d; }
+.modal-note { background: #152b26; border-color: #31574d; color: #a6e2d3; }
+.secondary-button { background: #1c2a20; border-color: #3d5240; }
+.history-item:hover, .history-item.active { background: #1b2a1e; color: #edf4e9; }
+.message.user .message-body { background: #1b2920; border-color: #344a39; }
+.message.assistant .message-avatar { background: #183029; }
+.tool-log { background: #142920; border-color: #2d5147; color: #8de3d0; }
+.toast { background: #1b2a20; border-color: #4a6244; }
+.build-mark { color: #d4ec8b; border-color: #526a3e; background: #1b291c; }
