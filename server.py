@@ -84,6 +84,11 @@ class Handler(SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
+        # Always revalidate the app shell and its JS/CSS so a stale bundle
+        # cannot leave the browser on an obsolete emergency-only interface.
+        if urlsplit(self.path).path in {"", "/", "/index.html", "/app.js", "/styles.css"}:
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
         super().end_headers()
 
     def do_POST(self):
