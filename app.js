@@ -2,12 +2,15 @@
 (() => {
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const KEYS={providers:"vc_providers_v1",chats:"vc_chats_v1",notes:"vc_notes_v1"};
+const KEYS={providers:"vc_providers_v1",chats:"vc_chats_v1",notes:"vc_notes_v1",mcp:"vc_github_mcp_v1"};
 const presets={custom:{name:"Custom provider",url:"",model:""},nvidia:{name:"NVIDIA NIM",url:"https://integrate.api.nvidia.com/v1",model:""},gemini:{name:"Google Gemini",url:"https://generativelanguage.googleapis.com/v1beta/openai",model:""},openai:{name:"OpenAI",url:"https://api.openai.com/v1",model:"gpt-4o-mini"},openrouter:{name:"OpenRouter",url:"https://openrouter.ai/api/v1",model:""},groq:{name:"Groq",url:"https://api.groq.com/openai/v1",model:""}};
 const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
 let providers=read(KEYS.providers,[]),chats=read(KEYS.chats,[]),notes=read(KEYS.notes,[]);
 if(!Array.isArray(providers))providers=[];if(!Array.isArray(chats))chats=[];if(!Array.isArray(notes))notes=[];
 let chatId=chats[0]?.id||null,editingId=null,busy=false,controller=null,pendingModels=[];
+let mcpConfig=read(KEYS.mcp,{token:"",readOnly:true,sessionId:"",connected:false});
+if(!mcpConfig||typeof mcpConfig!=="object")mcpConfig={token:"",readOnly:true,sessionId:"",connected:false};
+let githubMcpTools=[],githubMcpToolMap={},skillCatalog=[],pendingAttachments=[];
 const uid=()=>globalThis.crypto?.randomUUID?.()||("vc-"+Date.now()+"-"+Math.random().toString(36).slice(2));
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function toast(s){const el=$("#toast");if(!el){console.log(s);return}el.textContent=s;el.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove("show"),3000)}
@@ -21,16 +24,48 @@ function saveChats(){write(KEYS.chats,chats);renderHistory()}
 function saveProviders(){write(KEYS.providers,providers);renderProviders();renderModels()}
 function newChat(){const c={id:uid(),title:"New conversation",messages:[],createdAt:Date.now()};chats.unshift(c);chatId=c.id;saveChats();renderChat();setView("chat")}
 function renderHistory(){const el=$("#historyList");el.innerHTML=chats.slice(0,50).map(c=>'<button type="button" class="history-item '+(c.id===chatId?"active":"")+'" data-chat="'+esc(c.id)+'">'+esc(c.title||"Conversation")+'</button>').join("")}
-function renderModels(preferred){const el=$("#modelSelect"),old=preferred||el.value,opts=[];providers.forEach(p=>{[...new Set([...(Array.isArray(p.models)?p.models:[]),...(p.defaultModel?[p.defaultModel]:[])])].filter(Boolean).forEach(m=>opts.push({value:p.id+"::"+m,label:(p.name||"Provider")+" · "+m}))});el.innerHTML=opts.length?opts.map(o=>'<option value="'+esc(o.value)+'">'+esc(o.label)+'</option>').join(""):'<option value="">Add a provider first</option>';if(opts.some(o=>o.value===old))el.value=old;$("#tokenHint").textContent=providers.length?providers.length+" provider(s) connected":"Bring your own API";$("#providerCount").textContent=String(providers.length)}
+function renderModels(preferred){
+ const el=$("#modelSelect"),old=preferred||el.value,opts=[];
+ providers.forEach(p=>(Array.isArray(p.models)?p.models:[]).filter(Boolean).forEach(m=>opts.push({value:p.id+"::"+m,label:(p.name||"Provider")+" · "+m+" · FREE"})));
+ el.innerHTML=opts.length?opts.map(o=>'<option value="'+esc(o.value)+'">'+esc(o.label)+'</option>').join(""):'<option value="">No verified free models found</option>';
+ if(opts.some(o=>o.value===old))el.value=old;
+ $("#tokenHint").textContent=opts.length?opts.length+" verified free model(s)":"Free models only · unverified models are hidden";
+ $("#providerCount").textContent=String(providers.length);
+}
 function renderProviders(){const grid=$("#providerGrid");if(!grid)return;if(!providers.length){grid.innerHTML='<div class="empty-state">No providers connected yet.<br><br>Add NVIDIA, Gemini, OpenAI, Groq, OpenRouter, or a compatible endpoint.</div>';return}grid.innerHTML=providers.map(p=>{let host="Custom endpoint";try{host=new URL(p.baseUrl).hostname}catch{}return '<article class="provider-card"><div class="provider-card-head"><div class="provider-logo">'+esc((p.name||"P").slice(0,1).toUpperCase())+'</div><div><h3>'+esc(p.name||"Provider")+'</h3><small>'+esc(host)+'</small></div></div><div class="provider-model">'+esc(p.models?.length?p.models.length+" models available":p.defaultModel||"No model selected")+'</div><div class="provider-card-actions"><button type="button" data-edit="'+esc(p.id)+'">Edit</button><button type="button" data-refresh="'+esc(p.id)+'">Refresh models</button><button type="button" class="delete-provider" data-delete="'+esc(p.id)+'">Delete</button></div></article>'}).join("")}
-function markdown(s){let x=esc(s);const fence=String.fromCharCode(96).repeat(3);x=x.replace(new RegExp(fence+"([\\w-]*)\\n([\\s\\S]*?)"+fence,"g"),(_,l,c)=>"<pre><code>"+c+"</code></pre>");x=x.replace(/^### (.*)$/gm,"<h3>$1</h3>").replace(/^## (.*)$/gm,"<h2>$1</h2>").replace(/^# (.*)$/gm,"<h1>$1</h1>").replace(/\*\*(.*?)\*\*/g,"<b>$1</b>");return x.split(/\n{2,}/).map(p=>p.startsWith("<pre>")||p.startsWith("<h")?p:"<p>"+p.replace(/\n/g,"<br>")+"</p>").join("")}
-function renderChat(){const box=$("#messages"),welcome=$("#welcome"),c=current();if(!c){box.innerHTML="";welcome.style.display="block";return}const arr=Array.isArray(c.messages)?c.messages:[];welcome.style.display=arr.length?"none":"block";box.innerHTML=arr.map((m,i)=>{const user=m.role==="user";return '<article class="message '+(user?"user":"assistant")+'"><div class="message-avatar">'+(user?"Y":"✳")+'</div><div class="message-body"><div class="message-content">'+markdown(m.content||"")+'</div>'+(m.toolLog?'<div class="tool-log">'+esc(m.toolLog)+'</div>':"")+'<div class="message-meta">'+(user?"YOU":"VIBE CALLING")+(m.model?" · "+esc(m.model):"")+'</div>'+(user?"":'<div class="message-actions"><button type="button" data-copy="'+esc(m.content||"")+'">Copy</button><button type="button" data-retry="'+i+'">Regenerate</button></div>')+'</div></article>'}).join("");$("#chatContent").scrollTo(0,$("#chatContent").scrollHeight)}
+function markdown(s){
+ let x=esc(s),fence=String.fromCharCode(96).repeat(3);
+ x=x.replace(new RegExp(fence+"([\\w-]*)\\n([\\s\\S]*?)"+fence,"g"),(_,l,c)=>"<pre><code>"+c+"</code></pre>");
+ x=x.replace(/^### (.*)$/gm,"<h3>$1</h3>").replace(/^## (.*)$/gm,"<h2>$1</h2>").replace(/^# (.*)$/gm,"<h1>$1</h1>").replace(/\\*\\*(.*?)\\*\\*/g,"<b>$1</b>");
+ x=x.replace(/\\[([^\\]]+)\\]\\((\\/api\\/download\\/[^)\\s]+)\\)/g,'<a class="file-download" href="$2" download>$1</a>');
+ return x.split(/\\n{2,}/).map(p=>p.startsWith("<pre>")||p.startsWith("<h")?p:"<p>"+p.replace(/\\n/g,"<br>")+"</p>").join("");
+}
+function renderChat(){
+ const box=$("#messages"),welcome=$("#welcome"),c=current();
+ if(!c){box.innerHTML="";welcome.style.display="block";return}
+ const arr=Array.isArray(c.messages)?c.messages:[];
+ welcome.style.display=arr.length?"none":"block";
+ box.innerHTML=arr.map((m,i)=>{
+  const user=m.role==="user",files=Array.isArray(m.attachments)?m.attachments:[];
+  return '<article class="message '+(user?"user":"assistant")+'"><div class="message-avatar">'+(user?"Y":"✳")+'</div><div class="message-body"><div class="message-content">'+markdown(m.content||"")+'</div>'+
+  (files.length?'<div class="message-attachments">'+files.map(a=>'<span class="message-attachment">↳ '+esc(a.name)+'</span>').join("")+'</div>':"")+
+  (m.toolLog?'<div class="tool-log">'+esc(m.toolLog)+'</div>':"")+
+  '<div class="message-meta">'+(user?"YOU":"VIBE CALLING")+(m.model?" · "+esc(m.model):"")+'</div>'+
+  (user?"":'<div class="message-actions"><button type="button" data-copy="'+esc(m.content||"")+'">Copy</button><button type="button" data-retry="'+i+'">Regenerate</button></div>')+
+  '</div></article>';
+ }).join("");
+ $("#chatContent").scrollTo(0,$("#chatContent").scrollHeight);
+}
 function openProvider(providerId){pendingModels=[];editingId=providerId||null;const p=providerId?byId(providerId):null;$("#providerDialogTitle").textContent=p?"Edit provider":"Add a provider";$("#providerPreset").value="custom";$("#providerName").value=p?.name||"";$("#providerUrl").value=p?.baseUrl||"";$("#providerKey").value=p?.apiKey||"";$("#providerModel").value=p?.defaultModel||"";$("#providerHeader").value=p?.customHeader||"";$("#providerHeaderValue").value=p?.customHeaderValue||"";$("#providerFeedback").textContent="";$("#providerFeedback").className="feedback";$("#providerDialog").showModal()}
 function providerFromForm(){return{id:editingId||uid(),name:$("#providerName").value.trim()||"My provider",baseUrl:cleanUrl($("#providerUrl").value),apiKey:$("#providerKey").value.trim(),defaultModel:$("#providerModel").value.trim(),models:pendingModels.length?pendingModels:(editingId?(byId(editingId)?.models||[]):[]),customHeader:$("#providerHeader").value.trim(),customHeaderValue:$("#providerHeaderValue").value}}
 function requestBody(p,path,method,body){return{baseUrl:cleanUrl(p.baseUrl),path,method,apiKey:p.apiKey,customHeader:p.customHeader||"",customHeaderValue:p.customHeaderValue||"",body:body??null}}
 async function api(p,path,method="GET",body=null,signal){let r;try{r=await fetch("/api/proxy",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(requestBody(p,path,method,body)),signal})}catch(e){if(e.name==="AbortError")throw e;throw new Error("Could not reach local server. Run start.bat and open http://127.0.0.1:8765")}const raw=await r.text();if(!r.ok)throw new Error("HTTP "+r.status+": "+raw.slice(0,450));try{return raw?JSON.parse(raw):{}}catch{throw new Error("Provider response is not valid JSON")}}
-async function discover(p){const d=await api(p,"/models");return(d.data||d.models||[]).map(x=>x.id||x.name).filter(Boolean)}
-async function refresh(id){const p=byId(id);if(!p)return;toast("Fetching models…");try{p.models=await discover(p);saveProviders();toast("Loaded "+p.models.length+" models")}catch(e){toast("Model list failed: "+e.message)}}
+const GEMINI_FREE_MODELS=new Set(["gemini-3.8-flash","gemini-3.6-flash","gemini-3.5-flash-lite","gemini-3.1-flash-lite","gemini-3-flash-preview","gemini-2.5-flash","gemini-2.5-flash-lite"]);
+function providerHost(p){try{return new URL(p.baseUrl).hostname.toLowerCase()}catch{return""}}
+function hasZeroPricing(row){const pricing=row?.pricing;if(!pricing||typeof pricing!=="object")return false;const vals=["prompt","completion","input","output"].map(k=>pricing[k]).filter(v=>v!==undefined);return vals.length>=2&&vals.every(v=>Number(v)===0)}
+function isVerifiedFreeModel(p,row){const id=String(row?.id||row?.name||"").replace(/^models\\//,""),host=providerHost(p);if(host==="generativelanguage.googleapis.com"||host.endsWith(".googleapis.com"))return GEMINI_FREE_MODELS.has(id);if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return id.endsWith(":free")||hasZeroPricing(row);return hasZeroPricing(row)}
+async function discover(p){const d=await api(p,"/models"),rows=d.data||d.models||[];return rows.filter(x=>isVerifiedFreeModel(p,x)).map(x=>String(x.id||x.name||"").replace(/^models\\//,"")).filter(Boolean)}
+async function refresh(id){const p=byId(id);if(!p)return;toast("Checking free models…");try{p.models=await discover(p);if(p.defaultModel&&!p.models.includes(p.defaultModel))p.defaultModel="";saveProviders();toast("Found "+p.models.length+" verified free model(s)")}catch(e){toast("Model list failed: "+e.message)}}
 async function testProvider(){
   const p=providerFromForm(),fb=$("#providerFeedback"),button=$("#testProvider");
   fb.className="feedback";fb.textContent="";
