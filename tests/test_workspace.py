@@ -112,10 +112,11 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertEqual(source, match.group(1).strip())
 
     def test_live_agent_streaming_and_activity_ui_are_present(self):
-        app = (ROOT / "app.js").read_text(encoding="utf-8")
-        server = (ROOT / "server.py").read_text(encoding="utf-8")
-        html = (ROOT / "index.html").read_text(encoding="utf-8")
-        css = (ROOT / "styles.css").read_text(encoding="utf-8")
+        root = Path(__file__).resolve().parents[1]
+        app = (root / "app.js").read_text(encoding="utf-8")
+        server = (root / "server.py").read_text(encoding="utf-8")
+        html = (root / "index.html").read_text(encoding="utf-8")
+        css = (root / "styles.css").read_text(encoding="utf-8")
         self.assertIn("async function apiStream", app)
         self.assertIn("reasoning_summary", app)
         self.assertIn("agentLiveReasoning", app)
