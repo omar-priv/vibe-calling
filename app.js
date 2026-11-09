@@ -220,7 +220,7 @@ async function refreshWorkspacePanel(){
   filesEl.textContent="Start Vibe Calling with start.bat and refresh.";
  }
 }
-aasync function runTool(name,a){
+async function runTool(name,a){
  if(name.startsWith("mcp_github_"))return callGithubMcpTool(name,a);
  if(name==="skill_list"){const data=await skillsRequest({action:"list"});return data.skills.map(sk=>sk.id+" · "+sk.name+" — "+sk.description).join("\n")||"No skills are installed."}
  if(name==="skill_read")return readSkill(a.id);
