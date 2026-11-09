@@ -150,3 +150,24 @@ body {
 .tool-log { background: #142920; border-color: #2d5147; color: #8de3d0; }
 .toast { background: #1b2a20; border-color: #4a6244; }
 .build-mark { color: #d4ec8b; border-color: #526a3e; background: #1b291c; }
+
+
+/* Agent workspace */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.workspace-panel{margin-top:26px;padding:22px;border:1px solid var(--border,rgba(255,255,255,.1));border-radius:18px;background:rgba(255,255,255,.025)}
+.workspace-panel-head h2{margin:6px 0 4px;font-size:21px;letter-spacing:-.03em}
+.workspace-panel-head p{margin:0;color:var(--muted,#9095a5);font-size:13px}
+.workspace-create-row,.workspace-select-row{display:flex;align-items:end;gap:10px;margin-top:16px;flex-wrap:wrap}
+.workspace-create-row .field{flex:1;min-width:180px}
+.workspace-select-row .field-label{width:100%;margin:0}
+.workspace-select-row select{flex:1;min-width:180px}
+.workspace-status{margin-top:14px;color:var(--muted,#9095a5);font-size:12px}
+.workspace-files{max-height:260px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:10px 0 0;padding:13px 15px;border-radius:12px;border:1px solid var(--border,rgba(255,255,255,.08));background:rgba(0,0,0,.18);color:var(--text,#dfe2ec);font:12px/1.7 "DM Mono",monospace}
+.mcp-banner{margin-top:14px}
+.mcp-banner code{font-family:"DM Mono",monospace;color:var(--text,#dfe2ec)}
+@media(max-width:640px){
+ .workspace-panel{padding:16px}
+ .workspace-create-row,.workspace-select-row{align-items:stretch}
+ .workspace-create-row .primary-button,.workspace-select-row .secondary-button{width:100%}
+ .workspace-select-row select{width:100%}
+}
