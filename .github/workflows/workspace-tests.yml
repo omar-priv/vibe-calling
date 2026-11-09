@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feature/agent-workspace-github-mcp
+      - feature/skills-files-mcp-free-models-ui
   pull_request:
 
 jobs:
