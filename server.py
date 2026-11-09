@@ -13,10 +13,13 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import socket
 import ssl
 import subprocess
 import sys
+import tempfile
+import time
 import uuid
 import urllib.error
 import urllib.request
@@ -39,10 +42,12 @@ ALLOWED_PATHS = {"/models", "/chat/completions"}
 HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 PROJECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,49}$")
 SAFE_COMMAND_TOKEN_RE = re.compile(r"^[A-Za-z0-9_./:@=+,-]+$")
-IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", "coverage"}
+IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", ".vibe", "dist", "build", "coverage"}
 BLOCKED_FILES = {".env", ".env.local", ".env.production", ".env.development", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"}
-BLOCKED_WORKSPACE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".next", ".ssh", ".aws"}
+BLOCKED_WORKSPACE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".next", ".vibe", ".ssh", ".aws"}
 MAX_WORKSPACE_FILE_BYTES = 2 * 1024 * 1024
+MAX_PROJECT_MEMORY_BYTES = 256 * 1024
+RUNNING_PROJECTS = {}
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_SKILL_ARCHIVE_BYTES = 3 * 1024 * 1024
 SKILLS_ROOT = ROOT / "skills"
@@ -340,6 +345,254 @@ def list_project_files(project_id):
     return sorted(items, key=lambda item: item["path"])
 
 
+def project_memory_path(project_id):
+    base = project_dir(project_id)
+    folder = base / ".vibe"
+    if folder.is_symlink():
+        raise ValueError("Project memory directory cannot be a symbolic link.")
+    return folder / "memory.json"
+
+
+def read_project_memory(project_id):
+    target = project_memory_path(project_id)
+    default = {
+        "summary": "",
+        "goal": "",
+        "stack": [],
+        "decisions": [],
+        "completed": [],
+        "next_steps": [],
+        "updated_at": None,
+    }
+    if not target.exists():
+        return default
+    if target.is_symlink() or not target.is_file():
+        raise ValueError("Project memory file is invalid.")
+    if target.stat().st_size > MAX_PROJECT_MEMORY_BYTES:
+        raise ValueError("Project memory exceeds the 256 KB limit.")
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Project memory is corrupt and must be repaired before use.") from exc
+    if not isinstance(data, dict):
+        raise ValueError("Project memory must contain a JSON object.")
+    for key in ("summary", "goal"):
+        if not isinstance(data.get(key, ""), str):
+            raise ValueError("Project memory fields summary and goal must be text.")
+        default[key] = data.get(key, "")[:12000]
+    for key, limit in (("stack", 30), ("decisions", 60), ("completed", 100), ("next_steps", 60)):
+        value = data.get(key, [])
+        if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+            raise ValueError("Project memory field " + key + " must be a list of text.")
+        default[key] = [item[:2000] for item in value[:limit]]
+    default["updated_at"] = data.get("updated_at")
+    return default
+
+
+def write_project_memory(project_id, payload):
+    if not isinstance(payload, dict):
+        raise ValueError("Project memory must be a JSON object.")
+    current = read_project_memory(project_id)
+    updated = dict(current)
+    for key in ("summary", "goal"):
+        if key in payload:
+            if not isinstance(payload[key], str):
+                raise ValueError(key + " must be text.")
+            updated[key] = payload[key][:12000]
+    for key, limit in (("stack", 30), ("decisions", 60), ("completed", 100), ("next_steps", 60)):
+        if key in payload:
+            value = payload[key]
+            if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+                raise ValueError(key + " must be a list of text.")
+            updated[key] = [item[:2000] for item in value[:limit]]
+    updated["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    encoded = json.dumps(updated, ensure_ascii=False, indent=2).encode("utf-8")
+    if len(encoded) > MAX_PROJECT_MEMORY_BYTES:
+        raise ValueError("Project memory exceeds the 256 KB limit.")
+    target = project_memory_path(project_id)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".tmp")
+    temporary.write_bytes(encoded)
+    temporary.replace(target)
+    return updated
+
+
+def _free_local_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind((HOST, 0))
+        return sock.getsockname()[1]
+
+
+def project_server_status(project_id):
+    process_info = RUNNING_PROJECTS.get(project_id)
+    if not process_info:
+        return {"running": False, "url": None, "pid": None, "exit_code": None}
+    process = process_info["process"]
+    if process.poll() is not None:
+        try:
+            process_info["log"].close()
+        except Exception:
+            pass
+        RUNNING_PROJECTS.pop(project_id, None)
+        return {"running": False, "url": None, "pid": process.pid, "exit_code": process.returncode, "runtime": process_info["runtime"]}
+    return {"running": True, "url": process_info["url"], "pid": process.pid, "exit_code": None, "runtime": process_info["runtime"]}
+
+
+def start_project_server(project_id):
+    base = project_dir(project_id)
+    current = project_server_status(project_id)
+    if current["running"]:
+        return current
+
+    package_file = base / "package.json"
+    python_candidates = ("main.py", "app.py", "server.py", "run.py")
+    command = None
+    runtime = None
+    port = _free_local_port()
+    env = os.environ.copy()
+    env["HOST"] = "127.0.0.1"
+    env["PORT"] = str(port)
+
+    if package_file.is_file() and not package_file.is_symlink():
+        if package_file.stat().st_size > 256 * 1024:
+            raise ValueError("package.json is too large to inspect.")
+        try:
+            package = json.loads(package_file.read_text(encoding="utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("package.json is not valid UTF-8 JSON.") from exc
+        scripts = package.get("scripts", {}) if isinstance(package, dict) else {}
+        if not isinstance(scripts, dict):
+            raise ValueError("package.json scripts must be an object.")
+        script = "dev" if isinstance(scripts.get("dev"), str) else "start" if isinstance(scripts.get("start"), str) else ""
+        if not script:
+            raise ValueError("No npm dev or start script was found. Add one in package.json or use the static preview.")
+        npm_name = "npm.cmd" if os.name == "nt" else "npm"
+        npm_path = shutil.which(npm_name) or shutil.which("npm")
+        if not npm_path:
+            raise ValueError("npm is not installed or not on PATH.")
+        script_text = scripts[script].lower()
+        args = ["run", script]
+        if "vite" in script_text:
+            args += ["--", "--host", "127.0.0.1", "--port", str(port), "--strictPort"]
+            runtime = "Vite via npm " + script
+        elif "next" in script_text:
+            args += ["--", "--hostname", "127.0.0.1", "--port", str(port)]
+            runtime = "Next.js via npm " + script
+        else:
+            raise ValueError("The project script is not recognized as Vite or Next.js. For safe local preview, use one of these supported dev servers or add a static index.html.")
+        command = [npm_path] + args
+    else:
+        entry = next((name for name in python_candidates if (base / name).is_file() and not (base / name).is_symlink()), None)
+        if not entry:
+            raise ValueError("No supported app entry point found. Use index.html for static preview, or add package.json with a dev/start script.")
+        source = (base / entry).read_text(encoding="utf-8", errors="replace")[:512 * 1024]
+        python = sys.executable
+        module = Path(entry).stem
+        if "FastAPI(" in source or "FastAPI (" in source:
+            command = [python, "-m", "uvicorn", module + ":app", "--host", "127.0.0.1", "--port", str(port)]
+            runtime = "FastAPI / uvicorn"
+        elif "Flask(" in source or "Flask (" in source:
+            command = [python, "-m", "flask", "--app", module, "run", "--host", "127.0.0.1", "--port", str(port)]
+            runtime = "Flask"
+        else:
+            raise ValueError("The Python entry point is not recognized as FastAPI or Flask. Use a supported framework entry point or add a static index.html for preview.")
+
+    log_dir = Path(tempfile.gettempdir()) / "vibe-calling-runtime"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / (project_id + "-" + uuid.uuid4().hex[:8] + ".log")
+    log_handle = log_path.open("w", encoding="utf-8", errors="replace")
+    try:
+        if os.name == "nt" and command[0].lower().endswith((".cmd", ".bat")):
+            command_line = subprocess.list2cmdline(command)
+            launch = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command_line]
+        else:
+            launch = command
+        process = subprocess.Popen(
+            launch, cwd=str(base), env=env, stdin=subprocess.DEVNULL,
+            stdout=log_handle, stderr=subprocess.STDOUT, shell=False,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0,
+            start_new_session=(os.name != "nt"),
+        )
+        RUNNING_PROJECTS[project_id] = {
+            "process": process, "log": log_handle, "log_path": log_path,
+            "url": "http://127.0.0.1:" + str(port), "runtime": runtime,
+        }
+        deadline = time.monotonic() + 15.0
+        ready = False
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                break
+            try:
+                with socket.create_connection((HOST, port), timeout=0.4):
+                    ready = True
+                    break
+            except OSError:
+                time.sleep(0.25)
+        if not ready:
+            exit_code = process.poll()
+            try:
+                detail = log_path.read_text(encoding="utf-8", errors="replace")[-12000:]
+            except OSError:
+                detail = ""
+            stop_project_server(project_id)
+            raise RuntimeError(
+                "Project server did not open its local port within 15 seconds"
+                + (" (exit " + str(exit_code) + ")" if exit_code is not None else "")
+                + ". " + detail
+            )
+        status = project_server_status(project_id)
+        return {**status, "runtime": runtime, "log_path": str(log_path)}
+    except Exception:
+        try:
+            log_handle.close()
+        except Exception:
+            pass
+        raise
+
+
+def stop_project_server(project_id):
+    info = RUNNING_PROJECTS.get(project_id)
+    if not info:
+        return {"running": False, "stopped": False}
+    process = info["process"]
+    if process.poll() is None:
+        if os.name == "nt":
+            taskkill = shutil.which("taskkill") or "taskkill"
+            subprocess.run([taskkill, "/PID", str(process.pid), "/T", "/F"],
+                           capture_output=True, text=True, timeout=10, check=False)
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            if os.name == "nt":
+                process.kill()
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            process.wait(timeout=5)
+    try:
+        info["log"].close()
+    except Exception:
+        pass
+    RUNNING_PROJECTS.pop(project_id, None)
+    return {"running": False, "stopped": True, "pid": process.pid}
+
+
+def cleanup_project_servers():
+    for project_id in list(RUNNING_PROJECTS):
+        try:
+            stop_project_server(project_id)
+        except Exception:
+            pass
+
+
+
 def run_project_command(project_id, command):
     base = project_dir(project_id)
     if not isinstance(command, str) or not command.strip() or len(command) > 500:
@@ -358,7 +611,7 @@ def run_project_command(project_id, command):
     if executable in {"npm", "npm.cmd"}:
         allowed = (
             args in (["install"], ["ci"])
-            or (len(args) == 2 and args[0] == "run" and args[1] in {"build", "test", "lint"})
+            or (len(args) == 2 and args[0] == "run" and args[1] in {"build", "test", "lint", "typecheck"})
         )
     elif executable in {"npx", "npx.cmd"}:
         allowed = len(args) == 2 and args[0] == "playwright" and args[1] == "test"
@@ -366,8 +619,10 @@ def run_project_command(project_id, command):
         if executable == "py" and args and args[0] == "-3":
             args = args[1:]
         allowed = (
-            len(args) >= 2 and args[0] == "-m" and args[1] in {"compileall", "pytest", "unittest"}
-            and all(SAFE_COMMAND_TOKEN_RE.fullmatch(arg) for arg in args)
+            (len(args) >= 2 and args[0] == "-m" and args[1] in {"compileall", "pytest", "unittest"}
+             and all(SAFE_COMMAND_TOKEN_RE.fullmatch(arg) for arg in args))
+            or (args == ["-m", "pip", "install", "-r", "requirements.txt"]
+                and (base / "requirements.txt").is_file() and not (base / "requirements.txt").is_symlink())
         )
     elif executable == "git":
         allowed = (
@@ -376,8 +631,8 @@ def run_project_command(project_id, command):
         )
     if not allowed:
         raise ValueError(
-            "Command is not in the safe allowlist. Allowed: npm install/ci, npm run build/test/lint, "
-            "npx playwright test, python -m compileall/pytest/unittest, and read-only git status/diff/log."
+            "Command is not in the safe allowlist. Allowed: npm install/ci, npm run build/test/lint/typecheck, "
+            "npx playwright test, python -m compileall/pytest/unittest, python -m pip install -r requirements.txt, and read-only git status/diff/log."
         )
     if any(not SAFE_COMMAND_TOKEN_RE.fullmatch(arg) or ".." in arg or arg.startswith("/") for arg in args):
         raise ValueError("Command contains an unsupported or out-of-project argument.")
@@ -391,12 +646,12 @@ def run_project_command(project_id, command):
             completed = subprocess.run(
                 [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command_line],
                 cwd=str(base), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=120, shell=False
+                timeout=300 if (args in (["install"], ["ci"]) or args == ["-m", "pip", "install", "-r", "requirements.txt"]) else 120, shell=False
             )
         else:
             completed = subprocess.run(
                 final_args, cwd=str(base), capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=120, shell=False
+                encoding="utf-8", errors="replace", timeout=300 if (args in (["install"], ["ci"]) or args == ["-m", "pip", "install", "-r", "requirements.txt"]) else 120, shell=False
             )
     except subprocess.TimeoutExpired as exc:
         output = (exc.stdout or "") + "\n" + (exc.stderr or "")
@@ -512,11 +767,24 @@ class Handler(SimpleHTTPRequestHandler):
             else:
                 self.handle_remote_mcp(payload)
         except (UnicodeDecodeError, json.JSONDecodeError):
-            self.send_json(400, {"error": "Request body must be valid JSON."})
+            self.send_json(400, {"error": "Request body must be valid JSON.", "code": "INVALID_JSON"})
         except ValueError as exc:
-            self.send_json(400, {"error": str(exc)})
+            self.send_json(400, {"error": str(exc), "code": "VALIDATION_ERROR"})
+        except (TimeoutError, socket.timeout) as exc:
+            if route == "/api/proxy":
+                self.send_json(504, {"error": "The AI provider did not finish responding before the network read timeout. Retry once or choose another model.", "code": "PROVIDER_READ_TIMEOUT", "retryable": True})
+            else:
+                self.send_json(504, {"error": "The local " + route.rsplit("/", 1)[-1] + " operation timed out while reading or processing data.", "code": "LOCAL_OPERATION_TIMEOUT", "retryable": True})
+        except PermissionError as exc:
+            self.send_json(403, {"error": "Permission denied while accessing a local project file or process.", "code": "WORKSPACE_PERMISSION_DENIED"})
+        except OSError as exc:
+            if route == "/api/proxy":
+                self.send_json(502, {"error": "Provider network or socket error: " + str(exc), "code": "PROVIDER_NETWORK_ERROR", "retryable": True})
+            else:
+                self.send_json(500, {"error": "Local file or operating-system error: " + str(exc), "code": "LOCAL_FILESYSTEM_ERROR", "retryable": True})
         except Exception as exc:
-            self.send_json(500, {"error": "Local workspace error: " + str(exc)})
+            error_id = uuid.uuid4().hex[:10]
+            self.send_json(500, {"error": "Unexpected failure in " + route + " (reference " + error_id + ").", "code": "INTERNAL_ERROR", "reference": error_id})
 
     def handle_skills(self, payload):
         if not isinstance(payload, dict):
@@ -699,6 +967,22 @@ class Handler(SimpleHTTPRequestHandler):
         if action == "list_files":
             self.send_json(200, {"ok": True, "files": list_project_files(project)})
             return
+        if action == "read_memory":
+            self.send_json(200, {"ok": True, "memory": read_project_memory(project)})
+            return
+        if action == "write_memory":
+            memory = write_project_memory(project, payload.get("memory"))
+            self.send_json(200, {"ok": True, "memory": memory})
+            return
+        if action == "start_project":
+            self.send_json(200, {"ok": True, **start_project_server(project)})
+            return
+        if action == "stop_project":
+            self.send_json(200, {"ok": True, **stop_project_server(project)})
+            return
+        if action == "project_status":
+            self.send_json(200, {"ok": True, **project_server_status(project)})
+            return
         if action == "read_file":
             _, target = safe_workspace_path(project, payload.get("path"))
             if not target.is_file():
@@ -775,10 +1059,14 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if action == "preview":
             project_dir(project)
+            status = project_server_status(project)
+            if status["running"]:
+                self.send_json(200, {"ok": True, **status, "kind": "development-server"})
+                return
             relative = f"/projects/{project}/index.html"
             if not (WORKSPACE_ROOT / project / "index.html").is_file():
-                raise ValueError("This project has no index.html to preview yet.")
-            self.send_json(200, {"ok": True, "path": relative, "url": f"http://{HOST}:{PORT}{relative}"})
+                raise ValueError("This project has no index.html. Start its package.json dev script or add index.html for static preview.")
+            self.send_json(200, {"ok": True, "kind": "static", "path": relative, "url": f"http://{HOST}:{PORT}{relative}"})
             return
         raise ValueError("Unknown workspace action.")
 
@@ -832,7 +1120,9 @@ class Handler(SimpleHTTPRequestHandler):
             status = exc.code
             content_type = exc.headers.get("Content-Type", "application/json")
         except urllib.error.URLError as exc:
-            raise ValueError("Could not reach provider: " + str(exc.reason))
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                raise TimeoutError("The provider connection timed out while waiting for its response.") from exc
+            raise ConnectionError("Could not reach provider: " + str(exc.reason)) from exc
 
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -879,6 +1169,7 @@ def main():
     except KeyboardInterrupt:
         print("\nStopping Vibe Calling...")
     finally:
+        cleanup_project_servers()
         server.server_close()
     return 0
 

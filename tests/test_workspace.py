@@ -3,6 +3,7 @@ import io
 import re
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 
@@ -58,6 +59,47 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.run_project_command("demo", "python -c print(1)")
 
+    def test_project_memory_roundtrip_is_hidden_from_normal_file_listing(self):
+        memory = {
+            "goal": "Build a small dashboard.",
+            "summary": "The UI is implemented.",
+            "stack": ["HTML", "CSS", "JavaScript"],
+            "decisions": ["No external dependencies."],
+            "completed": ["Created the first page."],
+            "next_steps": ["Add validation tests."],
+        }
+        saved = server.write_project_memory("demo", memory)
+        loaded = server.read_project_memory("demo")
+        self.assertEqual(saved["goal"], memory["goal"])
+        self.assertEqual(loaded["stack"], memory["stack"])
+        paths = [item["path"] for item in server.list_project_files("demo")]
+        self.assertNotIn(".vibe/memory.json", paths)
+
+    def test_project_memory_rejects_invalid_field_types(self):
+        with self.assertRaisesRegex(ValueError, "stack must be a list"):
+            server.write_project_memory("demo", {"stack": "not-a-list"})
+
+    def test_project_memory_rejects_corrupt_json(self):
+        folder = server.WORKSPACE_ROOT / "demo" / ".vibe"
+        folder.mkdir()
+        (folder / "memory.json").write_text("{broken", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "corrupt"):
+            server.read_project_memory("demo")
+
+    def test_pip_requirements_command_is_allowlisted_only_when_file_exists(self):
+        (server.WORKSPACE_ROOT / "demo" / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+        completed = type("Completed", (), {"returncode": 0, "stdout": "installed", "stderr": ""})()
+        with patch.object(server.shutil, "which", return_value="/usr/bin/python"):
+            with patch.object(server.subprocess, "run", return_value=completed) as run:
+                result = server.run_project_command("demo", "python -m pip install -r requirements.txt")
+        self.assertEqual(result["exit_code"], 0)
+        run.assert_called_once()
+
+    def test_project_runtime_rejects_unknown_python_entrypoint(self):
+        (server.WORKSPACE_ROOT / "demo" / "main.py").write_text("print('not a web server')", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "not recognized as FastAPI or Flask"):
+            server.start_project_server("demo")
+
 
 
 class FrontendBundleTests(unittest.TestCase):
@@ -75,7 +117,12 @@ class FrontendBundleTests(unittest.TestCase):
         for name in (
             "workspace_create_project", "workspace_list_files", "workspace_read_file",
             "workspace_write_file", "workspace_delete_file", "workspace_run_command",
-            "workspace_preview", "skill_list", "skill_read", "workspace_download_file",
+            "workspace_preview", "workspace_start_project", "workspace_stop_project",
+            "workspace_project_status", "workspace_read_memory", "workspace_update_memory",
+            "runAgentLoop", "relevantSkillInstructions", "saveAgentResume", "continueAgentRun",
+            "sessionStorage", "workspace_start_project", "workspace_stop_project",
+            "workspace_read_memory", "workspace_update_memory",
+            "if(data.exit_code!==0)", "skill_list", "skill_read", "workspace_download_file",
             "upload_attachment", "read_attachment_base64", "connectGitHubMcp",
             "connectRemoteMcp", "callRemoteMcpTool", "NVIDIA_FREE_CHAT_MODELS",
         ):
@@ -99,7 +146,7 @@ class FrontendBundleTests(unittest.TestCase):
                            "githubPatInput", "githubReadOnly", "connectGithubMcp",
                            "remoteMcpUrl", "remoteMcpToken", "remoteMcpReadOnly",
                            "saveRemoteMcpSettings", "connectRemoteMcp",
-                           "nvidiaCatalogGrid", "remoteBrowserHeading"):
+                           "nvidiaCatalogGrid", "remoteBrowserHeading", "startProjectBtn", "stopProjectBtn", "projectMemoryPreview", "projectRuntimeStatus"):
             self.assertIn('id="' + element_id + '"', html)
 
 
