@@ -50,3 +50,13 @@ The provider request in this smoke test used a mocked successful response. It pr
 - Added `/__health` to report the local folder and the presence/size of the expected project files.
 - The launcher now scans localhost ports 8765 through 878? No. It tries 8765 through 878? It tries the next 24 ports if the first is already in use, preventing a previous Vibe Calling process from making the new copy appear to be the old one.
 - Verified that the inline application script syntax-compiles and matches the separate source file exactly.
+
+
+## 2026-11-09 — Agent workspace and GitHub MCP
+
+- Added local project create/list/read/write/delete/preview operations under the projects directory.
+- Added an allowlisted command runner with explicit confirmation for each run.
+- Added GitHub-hosted MCP configuration for MCP-compatible hosts; it is read-only by default and contains no credential value.
+- Added automated tests for path traversal rejection, secret filtering, shell command rejection, embedded JavaScript parity, and tool registration.
+- GitHub Actions passed Python compilation, Node JavaScript syntax checking, and the workspace unit tests on the pull request branch.
+- Not yet verified in a live browser on the user's Windows machine. GitHub MCP authentication also requires the user to provide a fine-grained GitHub PAT in a compatible MCP host.

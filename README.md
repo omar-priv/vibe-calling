@@ -1,6 +1,6 @@
 # Vibe Calling — Local Proxy Edition
 
-A lightweight local AI chat workspace for OpenAI-compatible providers, including NVIDIA NIM, Gemini, OpenAI, OpenRouter, Groq, and custom HTTPS endpoints.
+A lightweight local AI chat and project-building workspace for OpenAI-compatible providers, including NVIDIA NIM, Gemini, OpenAI, OpenRouter, Groq, and custom HTTPS endpoints.
 
 ## Run on Windows
 
@@ -13,6 +13,10 @@ A lightweight local AI chat workspace for OpenAI-compatible providers, including
 For NVIDIA NIM, use `https://integrate.api.nvidia.com/v1`.
 
 ## Features
+
+- Agent workspace tools: create projects, list/read/write files, preview static websites, and run an allowlisted set of build/test commands.
+- Agent file operations stay inside projects/<project-id>/; secrets and symbolic links are blocked. Deleting files and executing commands require user confirmation.
+- GitHub MCP configuration template for MCP-compatible hosts is in .vscode/mcp.json (read-only by default). See docs/agent-tools-and-mcp.md.
 
 - Multiple OpenAI-compatible providers and manually selected model IDs.
 - Provider model discovery via the local proxy.
@@ -31,12 +35,15 @@ For NVIDIA NIM, use `https://integrate.api.nvidia.com/v1`.
 - `start.bat` — Windows launcher.
 - `docs/skills-reviewed.md` — UI/UX skill references reviewed and applied.
 - `docs/qa-smoke-test.md` — interaction and save-flow smoke test results.
+- `docs/agent-tools-and-mcp.md` — agent workspace tools, MCP explanation, and GitHub MCP setup.
 
 ## Important security note
 
 This edition is designed for personal use on the same computer. The Python server binds only to `127.0.0.1`; do not expose it to the public internet. API keys remain in this browser's local storage and are not encrypted by the app. Do not use it in a shared browser profile.
 
 The proxy forwards requests to HTTPS provider endpoints and blocks local/private-network targets. GitHub Pages alone cannot run this Python proxy; run the included launcher on your computer.
+
+Agent workspace commands execute on your computer inside the selected project folder. They are allowlisted and ask for confirmation, but they are not an OS-level sandbox. Do not approve commands or dependencies from projects you do not trust.
 
 ## Current limitations
 

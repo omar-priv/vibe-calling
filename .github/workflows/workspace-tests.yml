@@ -1,0 +1,29 @@
+name: Vibe Calling workspace safety
+
+on:
+  push:
+    branches:
+      - main
+      - feature/agent-workspace-github-mcp
+  pull_request:
+
+jobs:
+  workspace-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Compile server
+        run: python -m py_compile server.py
+      - name: Check JavaScript syntax
+        run: node --check app.js
+      - name: Run workspace safety tests
+        run: python -m unittest discover -s tests -v
