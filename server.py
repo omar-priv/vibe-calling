@@ -79,7 +79,10 @@ def validate_target(base_url):
 def project_dir(project_id, must_exist=True):
     if not isinstance(project_id, str) or not PROJECT_ID_RE.fullmatch(project_id):
         raise ValueError("Invalid project ID.")
-    target = (WORKSPACE_ROOT / project_id).resolve()
+    candidate = WORKSPACE_ROOT / project_id
+    if candidate.is_symlink():
+        raise ValueError("Project folders cannot be symbolic links.")
+    target = candidate.resolve()
     try:
         target.relative_to(WORKSPACE_ROOT.resolve())
     except ValueError:
@@ -152,7 +155,7 @@ def run_project_command(project_id, command):
     if executable in {"npm", "npm.cmd"}:
         allowed = (
             args in (["install"], ["ci"])
-            or (len(args) == 2 and args[0] == "run" and args[1] in {"build", "test", "lint", "dev", "start"})
+            or (len(args) == 2 and args[0] == "run" and args[1] in {"build", "test", "lint"})
         )
     elif executable in {"npx", "npx.cmd"}:
         allowed = len(args) == 2 and args[0] == "playwright" and args[1] == "test"
