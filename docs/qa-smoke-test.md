@@ -60,3 +60,16 @@ The provider request in this smoke test used a mocked successful response. It pr
 - Added automated tests for path traversal rejection, secret filtering, shell command rejection, embedded JavaScript parity, and tool registration.
 - GitHub Actions passed Python compilation, Node JavaScript syntax checking, and the workspace unit tests on the pull request branch.
 - Not yet verified in a live browser on the user's Windows machine. GitHub MCP authentication also requires the user to provide a fine-grained GitHub PAT in a compatible MCP host.
+
+
+## 2026-11-10 — Agent reliability work (automated scope)
+
+The reliability branch adds:
+- Skill preloading based on the user's request and a compatibility fallback when the model mistakenly calls a skill ID as a tool.
+- A 24-step Agent tool cycle with progress, Stop, and resumable Continue task state held in the browser session.
+- Differentiated provider timeout/network, local workspace timeout/filesystem, validation, and unexpected error responses.
+- Project memory stored under hidden `.vibe/memory.json`, with validation and atomic updates.
+- Supported project runtime start/status/stop operations for Vite, Next.js, FastAPI, and Flask, including readiness probing and process-tree shutdown.
+- Command failure propagation so non-zero exit codes reach the model as tool failures.
+
+Automated Python/Node checks and browser interactions must be reported from the actual CI run. This repository update has not been tested in the user's local Windows environment or with their NVIDIA API key. The local-only server is still bound to `127.0.0.1`; public hosting is not part of this reliability test.
