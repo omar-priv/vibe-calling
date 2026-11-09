@@ -152,9 +152,9 @@ def install_skill_upload(filename, encoded):
                 raise ValueError("A skill archive can contain up to 30 files.")
             total = 0
             for member in members:
-                name = member.filename.replace("\\\\", "/")
+                name = member.filename.replace("\\", "/")
                 parts = name.split("/")
-                if name.startswith("/") or any(p in {"", ".", ".."} for p in parts):
+                if name.startswith("/") or any(p in {"", ".", ".."} for p in parts) or ":" in parts[0]:
                     raise ValueError("The ZIP contains an unsafe path.")
                 if (member.external_attr >> 16) & 0o170000 == 0o120000:
                     raise ValueError("Symbolic links are not allowed in skill archives.")
@@ -529,8 +529,9 @@ class Handler(SimpleHTTPRequestHandler):
             "Content-Type": "application/json",
             "X-MCP-Toolsets": "repos,issues,pull_requests",
             "X-MCP-Readonly": "true" if payload.get("read_only", True) else "false",
-            "MCP-Protocol-Version": "2025-03-26",
         }
+        if message.get("method") != "initialize":
+            headers["MCP-Protocol-Version"] = "2025-03-26"
         session_id = payload.get("session_id")
         if isinstance(session_id, str) and session_id and len(session_id) < 500:
             headers["MCP-Session-Id"] = session_id
