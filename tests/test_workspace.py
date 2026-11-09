@@ -62,7 +62,7 @@ class FrontendBundleTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         source = (root / "app.js").read_text(encoding="utf-8").strip()
         html = (root / "index.html").read_text(encoding="utf-8")
-        match = re.search(r"<script>\\s*([\\s\\S]*?)\\s*</script>", html)
+        match = re.search(r"<script>\s*([\s\S]*?)\s*</script>", html)
         self.assertIsNotNone(match, "index.html must contain its self-contained app script")
         self.assertEqual(source, match.group(1).strip())
 
