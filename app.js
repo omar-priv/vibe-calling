@@ -339,6 +339,7 @@ function setActiveProject(project){
 }
 async function refreshWorkspacePanel(){
  const select=$("#projectSelect"),filesEl=$("#workspaceFiles"),status=$("#workspaceStatus");
+ const runtime=$("#projectRuntimeStatus"),memoryPreview=$("#projectMemoryPreview");
  if(!select||!filesEl||!status)return;
  try{
   const data=await workspaceRequest({action:"list_projects"});
@@ -349,15 +350,40 @@ async function refreshWorkspacePanel(){
   if(!activeProject){
    filesEl.textContent="No project selected. Create one here or ask Agent mode to create it.";
    status.textContent=projects.length+" project(s) available.";
+   if(runtime)runtime.textContent="No project selected.";
+   if(memoryPreview)memoryPreview.textContent="No project selected. Project memory appears here when a project is active.";
    return;
   }
-  const listing=await workspaceRequest({action:"list_files",project:activeProject});
+  const [listing,server,memory]=await Promise.all([
+   workspaceRequest({action:"list_files",project:activeProject}),
+   workspaceRequest({action:"project_status",project:activeProject}),
+   workspaceRequest({action:"read_memory",project:activeProject})
+  ]);
   const items=listing.files||[];
   filesEl.textContent=items.length?items.map(x=>x.path+" · "+x.bytes+" bytes").join("\n"):"Project is empty. Ask the agent to create the first files.";
   status.textContent=activeProject+" · "+items.length+" file(s)";
+  if(runtime)runtime.textContent=server.running?"Running · "+server.runtime+" · "+server.url+" · PID "+server.pid:"Not running"+(server.exit_code!==null?" · Last process exit code: "+server.exit_code:"");
+  if(memoryPreview){
+   const mem=memory.memory||{};
+   memoryPreview.textContent=[
+    "GOAL: "+(mem.goal||"(not recorded)"),
+    "",
+    "SUMMARY: "+(mem.summary||"(not recorded)"),
+    "",
+    "STACK: "+((mem.stack||[]).join(", ")||"(not recorded)"),
+    "",
+    "DECISIONS:\n"+((mem.decisions||[]).map(x=>"• "+x).join("\n")||"(none)"),
+    "",
+    "COMPLETED:\n"+((mem.completed||[]).map(x=>"• "+x).join("\n")||"(none)"),
+    "",
+    "NEXT STEPS:\n"+((mem.next_steps||[]).map(x=>"• "+x).join("\n")||"(none)")
+   ].join("\n");
+  }
  }catch(error){
-  status.textContent="Workspace unavailable: "+error.message;
-  filesEl.textContent="Start Vibe Calling with start.bat and refresh.";
+  status.textContent="Workspace unavailable ["+(error.code||"UNKNOWN")+"]: "+error.message;
+  filesEl.textContent="Check that start.bat is running, then refresh.";
+  if(runtime)runtime.textContent="Runtime status unavailable.";
+  if(memoryPreview)memoryPreview.textContent="Project memory unavailable.";
  }
 }
 async function runTool(name,a){
@@ -614,6 +640,8 @@ if(b.id==="toggleKey"){$("#providerKey").type=$("#providerKey").type==="password
 if(b.id==="testProvider"){testProvider();return}
 if(b.id==="createProjectBtn"){(async()=>{const input=$("#projectNameInput"),name=input.value.trim();if(!name){toast("Enter a project name first.");return}try{const data=await workspaceRequest({action:"create_project",name});setActiveProject(data.project);input.value="";await refreshWorkspacePanel();toast("Project created: "+data.project)}catch(error){toast(error.message)}})();return}
 if(b.id==="refreshWorkspaceBtn"){refreshWorkspacePanel();return}
+if(b.id==="startProjectBtn"){(async()=>{if(!activeProject){toast("Select a project first.");return}if(!confirm("Start the development server for '"+activeProject+"'? This runs its project code on your computer."))return;try{const data=await workspaceRequest({action:"start_project",project:activeProject});toast("Project server started: "+data.url);await refreshWorkspacePanel()}catch(error){toast("Could not start project: "+error.message);await refreshWorkspacePanel()}})();return}
+if(b.id==="stopProjectBtn"){(async()=>{if(!activeProject){toast("Select a project first.");return}try{const data=await workspaceRequest({action:"stop_project",project:activeProject});toast(data.stopped?"Project server stopped.":"No project server was running.");await refreshWorkspacePanel()}catch(error){toast("Could not stop project: "+error.message)}})();return}
 if(b.id==="connectGithubMcp"){connectGitHubMcp();return}
 if(b.dataset.addNvidiaModel){chooseNvidiaModel(b.dataset.addNvidiaModel);return}
 if(b.id==="saveRemoteMcpSettings"){saveRemoteMcpSettings();return}
@@ -625,7 +653,7 @@ if(b.dataset.removeAttachment!==undefined){pendingAttachments.splice(Number(b.da
 if(b.id==="previewProjectBtn"){(async()=>{const tab=window.open("about:blank","_blank");try{if(!activeProject)throw Error("Select a project first.");const data=await workspaceRequest({action:"preview",project:activeProject});if(tab)tab.location=data.url;else toast(data.url)}catch(error){if(tab)tab.close();toast(error.message)}})();return}
 if(b.id==="clearHistory"){if(confirm("Clear all conversations?")){chats=[];chatId=null;saveChats();renderChat()}return}
 if(b.id==="clearAll"){$("#confirmDialog").showModal();return}
-if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));providers=[];chats=[];notes=[];chatId=null;remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};remoteMcpTools=[];remoteMcpToolMap={};$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
+if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));try{sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}clearAgentResume();providers=[];chats=[];notes=[];chatId=null;remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};remoteMcpTools=[];remoteMcpToolMap={};$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
 if(b.id==="chatOptions"){toast("More options coming soon.");return}
 if(b.dataset.view){setView(b.dataset.view);return}
 if(b.dataset.close){$("#"+b.dataset.close)?.close();return}
