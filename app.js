@@ -174,7 +174,7 @@ const tools=[
  toolDef("workspace_write_file","Create or replace a UTF-8 text file inside one project. Parent folders are created automatically. Never write credentials or .env files.",{project:{type:"string"},path:{type:"string"},content:{type:"string"}},["project","path","content"]),
  toolDef("workspace_delete_file","Delete one file inside the project. The user must approve the deletion in a confirmation dialog.",{project:{type:"string"},path:{type:"string"}},["project","path"]),
  toolDef("workspace_run_command","Run an allowlisted dependency, build, lint, or test command in the project. Each command requires user approval. Supports npm install/ci and build/test/lint/typecheck, npx playwright test, python -m pip install -r requirements.txt, python -m compileall/pytest/unittest, and read-only git status/diff/log.",{project:{type:"string"},command:{type:"string"}},["project","command"]),
- toolDef("workspace_start_project","Start a supported project development server after user approval. Supports package.json dev/start scripts and conventional Python entry points.",{project:{type:"string"}},["project"]),
+ toolDef("workspace_start_project","Start a supported local development server after user approval. Supported: Vite, Next.js, FastAPI with Uvicorn, and Flask.",{project:{type:"string"}},["project"]),
  toolDef("workspace_stop_project","Stop a development server previously started by this workspace.",{project:{type:"string"}},["project"]),
  toolDef("workspace_project_status","Check whether a project's development server is running.",{project:{type:"string"}},["project"]),
  toolDef("workspace_read_memory","Read persistent project summary, goal, stack, decisions, completed work and next steps.",{project:{type:"string"}},["project"]),
@@ -428,9 +428,10 @@ async function runTool(name,a){
   return "Saved "+data.path+" ("+data.bytes+" bytes).";
  }
  if(name==="workspace_delete_file"){
-  if(!confirm("The agent wants to permanently delete this file:\n\n"+a.project+"/"+a.path+"\n\nAllow this deletion?"))return "User declined the file deletion.";
-  const data=await workspaceRequest({action:"delete_file",project:a.project,path:a.path,confirmed:true});
-  if(a.project===activeProject)await refreshWorkspacePanel();
+  const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
+  if(!confirm("The agent wants to permanently delete this file:\n\n"+project+"/"+a.path+"\n\nAllow this deletion?"))return "User declined the file deletion.";
+  const data=await workspaceRequest({action:"delete_file",project,path:a.path,confirmed:true});
+  if(project===activeProject)await refreshWorkspacePanel();
   return "Deleted "+data.deleted+".";
  }
  if(name==="workspace_run_command"){
@@ -445,11 +446,13 @@ async function runTool(name,a){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
   if(!confirm("Start this project's development process on your computer? The project code will run locally. Only approve trusted files."))return "User declined starting the project server.";
   const data=await workspaceRequest({action:"start_project",project});
+  if(project===activeProject)await refreshWorkspacePanel();
   return "Development server started. Runtime: "+data.runtime+". URL: "+data.url+" (local computer only). PID: "+data.pid;
  }
  if(name==="workspace_stop_project"){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
   const data=await workspaceRequest({action:"stop_project",project});
+  if(project===activeProject)await refreshWorkspacePanel();
   return data.stopped?"Stopped project server (PID "+data.pid+").":"No running project server was registered.";
  }
  if(name==="workspace_project_status"){
@@ -466,10 +469,12 @@ async function runTool(name,a){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
   const memory={};["summary","goal","stack","decisions","completed","next_steps"].forEach(key=>{if(a[key]!==undefined)memory[key]=a[key]});
   const data=await workspaceRequest({action:"write_memory",project,memory});
+  if(project===activeProject)await refreshWorkspacePanel();
   return "Project memory updated at "+data.memory.updated_at+".";
  }
  if(name==="workspace_preview"){
-  const data=await workspaceRequest({action:"preview",project:a.project});
+  const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
+  const data=await workspaceRequest({action:"preview",project});
   return "Preview is ready: "+data.url+"\nOpen that URL in your browser. The project must contain index.html.";
  }
  throw Error("Unknown tool: "+name);
@@ -551,8 +556,11 @@ async function runAgentLoop(state,spinner){
     let output="",failed=false;
     try{
      output=await runTool(name,args);
-     if(typeof output==="string"&&/^Command failed with exit code|^Tool error:|^Error:/i.test(output))throw new Error(output);
-     state.used.push(name+" ✓");
+     if(typeof output==="string"&&output.startsWith("User declined"))state.used.push(name+" declined");
+     else{
+      if(typeof output==="string"&&/^Command failed with exit code|^Tool error:|^Error:/i.test(output))throw new Error(output);
+      state.used.push(name+" ✓");
+     }
     }catch(error){
      failed=true;output="Tool error: "+(error.message||String(error));state.used.push(name+" failed");
     }
