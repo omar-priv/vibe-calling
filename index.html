@@ -838,12 +838,22 @@ async function runAgentLoop(state,spinner){
   if(controller?.signal.aborted)throw new DOMException("Request stopped.","AbortError");
   setAgentProgress("Waiting for model · step "+(n+1)+" of "+(startStep+24));
   saveAgentResume({...state,step:n});
-  const msg=await apiStream(provider,{model:state.model,messages:state.history,temperature:.7,tools:buildAgentTools(),tool_choice:"auto"},controller.signal,event=>{
-   if(event.type==="reasoning")updateAgentLive("reasoning",event);
-   else if(event.type==="content")updateAgentLive("content",event);
-   else if(event.type==="tool_delta")updateAgentLive("tool_delta",event);
-   else if(event.type==="finish")setAgentProgress("Model finished response · "+(event.reason||"done"));
-  });
+  const streamBody={model:state.model,messages:state.history,temperature:.7,tools:buildAgentTools(),tool_choice:"auto"};
+  let msg;
+  try{
+   msg=await apiStream(provider,streamBody,controller.signal,event=>{
+    if(event.type==="reasoning")updateAgentLive("reasoning",event);
+    else if(event.type==="content")updateAgentLive("content",event);
+    else if(event.type==="tool_delta")updateAgentLive("tool_delta",event);
+    else if(event.type==="finish")setAgentProgress("Model finished response · "+(event.reason||"done"));
+   });
+  }catch(streamError){
+   if(controller?.signal.aborted)throw streamError;
+   if(!/stream(?:ing)?[^.]{0,80}(?:not supported|unsupported|not available|not allowed)|unsupported[^.]{0,80}stream/i.test(streamError.message||""))throw streamError;
+   setAgentProgress("Provider does not support streaming · using step-by-step mode");
+   msg=(await api(provider,"/chat/completions","POST",{...streamBody,stream:false},controller.signal)).choices?.[0]?.message;
+   if(msg?.content)updateAgentLive("content",{content:msg.content});
+  }
   if(!msg)throw new Error("Provider returned an empty response.");
   if(Array.isArray(msg.tool_calls)&&msg.tool_calls.length){
    state.history.push(msg);
