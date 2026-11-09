@@ -324,6 +324,75 @@ async function api(p,path,method="GET",body=null,signal){
  if(!data||typeof data!=="object")throw new Error("Provider response is not valid JSON");
  return data;
 }
+async function apiStream(p,body,signal,onEvent){
+ let response;
+ try{
+  response=await fetch("/api/proxy",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(requestBody(p,"/chat/completions","POST",{...body,stream:true})),signal});
+ }catch(error){
+  if(error.name==="AbortError")throw error;
+  const wrapped=new Error("Could not reach the local Vibe Calling server. Check start.bat and your network connection. "+error.message);
+  wrapped.code="LOCAL_SERVER_UNREACHABLE";wrapped.retryable=true;throw wrapped;
+ }
+ if(!response.ok){
+  const raw=await response.text();let data={};try{data=JSON.parse(raw)}catch{}
+  throw new Error(data.error?.message||data.error||("Provider request failed with HTTP "+response.status+"."));
+ }
+ const type=response.headers.get("content-type")||"";
+ if(!response.body||!type.includes("text/event-stream")){
+  const data=await response.json();
+  const message=data.choices?.[0]?.message;
+  if(!message)throw new Error(data.error?.message||"Provider returned an empty response.");
+  onEvent?.({type:"fallback",message});
+  return message;
+ }
+ const reader=response.body.getReader(),decoder=new TextDecoder();
+ let buffer="",content="",reasoning="",toolCalls=new Map(),finished=false;
+ const dispatch=raw=>{
+  const lines=raw.split(/\r?\n/),dataLines=lines.filter(line=>line.startsWith("data:")).map(line=>line.slice(5).trim());
+  if(!dataLines.length)return;
+  const payload=dataLines.join("\n");
+  if(payload==="[DONE]"){finished=true;return}
+  let chunk;try{chunk=JSON.parse(payload)}catch{return}
+  if(chunk.error)throw new Error(chunk.error.message||"Provider stream failed.");
+  const choice=chunk.choices?.[0],delta=choice?.delta||{};
+  const textPart=typeof delta.content==="string"?delta.content:Array.isArray(delta.content)?delta.content.map(x=>x.text||"").join(""):"";
+  if(textPart){content+=textPart;onEvent?.({type:"content",text:textPart,content})}
+  const reasoningPart=[delta.reasoning_content,delta.reasoning,delta.reasoning_summary,delta.summary].filter(x=>typeof x==="string"&&x).join("\n");
+  if(reasoningPart){reasoning+=reasoningPart;onEvent?.({type:"reasoning",text:reasoningPart,reasoning})}
+  if(Array.isArray(delta.tool_calls)){
+   for(const item of delta.tool_calls){
+    const index=Number.isInteger(item.index)?item.index:toolCalls.size;
+    const current=toolCalls.get(index)||{id:"",type:"function",function:{name:"",arguments:""}};
+    if(item.id)current.id=item.id;
+    if(item.type)current.type=item.type;
+    if(item.function?.name)current.function.name+=item.function.name;
+    if(item.function?.arguments)current.function.arguments+=item.function.arguments;
+    toolCalls.set(index,current);
+    onEvent?.({type:"tool_delta",name:current.function.name||"Preparing tool",arguments:current.function.arguments});
+   }
+  }
+  if(choice?.finish_reason){finished=true;onEvent?.({type:"finish",reason:choice.finish_reason})}
+ };
+ try{
+  while(true){
+   const {value,done}=await reader.read();if(done)break;
+   buffer+=decoder.decode(value,{stream:true});
+   let split;
+   while((split=buffer.search(/\r?\n\r?\n/))>=0){
+    const raw=buffer.slice(0,split),separator=buffer.slice(split).match(/^\r?\n\r?\n/)[0];
+    buffer=buffer.slice(split+separator.length);dispatch(raw);
+   }
+  }
+  buffer+=decoder.decode();
+  if(buffer.trim())dispatch(buffer);
+ }catch(error){try{await reader.cancel()}catch{}throw error}
+ const tools=[...toolCalls.entries()].sort((a,b)=>a[0]-b[0]).map(([,value])=>value);
+ if(!content&&!tools.length&&!reasoning)throw new Error("Provider stream ended without a response.");
+ const message={role:"assistant",content,tool_calls:tools};
+ // Only attach an explicitly returned reasoning summary; never synthesize hidden reasoning.
+ if(reasoning)message.reasoning_summary=reasoning;
+ return message;
+}
 const GEMINI_FREE_MODELS=new Set(["gemini-3.8-flash","gemini-3.6-flash","gemini-3.5-flash-lite","gemini-3.1-flash-lite","gemini-3-flash-preview","gemini-2.5-flash","gemini-2.5-flash-lite"]);
 /* Catalog snapshot: only NVIDIA Free Endpoints with a documented programmatic Chat Completions example. Newest first. */
 const NVIDIA_FREE_CHAT_MODELS=[
@@ -743,20 +812,49 @@ function saveAgentResume(state){
 }
 function clearAgentResume(){pendingAgentRun=null;try{sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}}
 function makeAgentSpinner(){
- const spinner=document.createElement("div");spinner.className="agent-running";
- spinner.innerHTML='<span class="typing-dots"><i></i><i></i><i></i></span><span id="agentProgress" aria-live="polite">Preparing the task…</span><button type="button" id="stopAgentBtn" class="stop-agent">Stop</button>';
+ const spinner=document.createElement("section");spinner.className="agent-running";
+ spinner.innerHTML='<div class="agent-live-head"><span class="typing-dots"><i></i><i></i><i></i></span><strong id="agentProgress" aria-live="polite">Preparing the task…</strong><button type="button" id="stopAgentBtn" class="stop-agent">Stop</button></div><div class="agent-live-reasoning" id="agentLiveReasoning" hidden><span class="agent-live-label">MODEL REASONING SUMMARY</span><div id="agentReasoningText"></div></div><div class="agent-live-plan" id="agentLivePlan" hidden><span class="agent-live-label">LIVE RESPONSE / PLAN</span><div id="agentLivePlanText"></div></div><div class="agent-live-tools" id="agentLiveTools"><span class="agent-live-label">EXECUTION LOG</span><ol id="agentLiveToolList"></ol></div>';
  $("#messages").appendChild(spinner);return spinner;
+}
+function updateAgentLive(type,payload){
+ const reasoning=$("#agentReasoningText"),reasoningBox=$("#agentLiveReasoning");
+ const plan=$("#agentLivePlanText"),planBox=$("#agentLivePlan");
+ if(type==="reasoning"&&reasoning&&reasoningBox){reasoningBox.hidden=false;reasoning.textContent=payload.reasoning||payload.text||"";return}
+ if(type==="content"&&plan&&planBox){planBox.hidden=false;plan.textContent=payload.content||payload.text||"";return}
+ if(type==="tool"||type==="tool_delta"||type==="tool_result"){
+  const list=$("#agentLiveToolList");if(!list)return;
+  const label=type==="tool_result"?(payload.failed?"Failed: ":"Completed: ")+(payload.name||"tool"):type==="tool_delta"?"Preparing: "+(payload.name||"tool"):"Running: "+(payload.name||"tool");
+  const key=payload.name||"tool";
+  let item=[...list.children].reverse().find(node=>node.dataset.tool===key&&node.dataset.done!=="true");
+  if(!item){item=document.createElement("li");item.dataset.tool=key;list.appendChild(item)}
+  item.textContent=label+(payload.detail?" · "+payload.detail:"");
+  if(type==="tool_result")item.dataset.done="true";
+ }
 }
 async function runAgentLoop(state,spinner){
  const provider=byId(state.providerId);if(!provider)throw new Error("The provider used by this task is no longer saved. Select it again and resend the request.");
  const startStep=state.step||0;let answer="",finished=false;
  for(let n=startStep;n<startStep+24;n++){
   if(controller?.signal.aborted)throw new DOMException("Request stopped.","AbortError");
-  setAgentProgress("Thinking · execution step "+(n+1)+" of "+(startStep+24));
+  setAgentProgress("Waiting for model · step "+(n+1)+" of "+(startStep+24));
   saveAgentResume({...state,step:n});
-  const response=await api(provider,"/chat/completions","POST",{model:state.model,messages:state.history,temperature:.7,stream:false,tools:buildAgentTools(),tool_choice:"auto"},controller.signal);
-  const msg=response.choices?.[0]?.message;
-  if(!msg)throw new Error(response.error?.message||"Provider returned an empty response.");
+  const streamBody={model:state.model,messages:state.history,temperature:.7,tools:buildAgentTools(),tool_choice:"auto"};
+  let msg;
+  try{
+   msg=await apiStream(provider,streamBody,controller.signal,event=>{
+    if(event.type==="reasoning")updateAgentLive("reasoning",event);
+    else if(event.type==="content")updateAgentLive("content",event);
+    else if(event.type==="tool_delta")updateAgentLive("tool_delta",event);
+    else if(event.type==="finish")setAgentProgress("Model finished response · "+(event.reason||"done"));
+   });
+  }catch(streamError){
+   if(controller?.signal.aborted)throw streamError;
+   if(!/stream(?:ing)?[^.]{0,80}(?:not supported|unsupported|not available|not allowed)|unsupported[^.]{0,80}stream/i.test(streamError.message||""))throw streamError;
+   setAgentProgress("Provider does not support streaming · using step-by-step mode");
+   msg=(await api(provider,"/chat/completions","POST",{...streamBody,stream:false},controller.signal)).choices?.[0]?.message;
+   if(msg?.content)updateAgentLive("content",{content:msg.content});
+  }
+  if(!msg)throw new Error("Provider returned an empty response.");
   if(Array.isArray(msg.tool_calls)&&msg.tool_calls.length){
    state.history.push(msg);
    for(let index=0;index<msg.tool_calls.length;index++){
@@ -768,6 +866,7 @@ async function runAgentLoop(state,spinner){
      continue;
     }
     setAgentProgress("Running tool · "+name);
+    updateAgentLive("tool",{name});
     let output="",failed=false;
     try{
      output=await runTool(name,args);
@@ -780,6 +879,7 @@ async function runAgentLoop(state,spinner){
      failed=true;output="Tool error: "+(error.message||String(error));state.used.push(name+" failed");
     }
     state.history.push({role:"tool",tool_call_id:id,name,content:String(output).slice(0,30000)});
+    updateAgentLive("tool_result",{name,failed,detail:String(output).slice(0,180)});
     saveAgentResume({...state,step:n+1});
     setAgentProgress((failed?"Tool failed · ":"Completed tool · ")+name);
    }

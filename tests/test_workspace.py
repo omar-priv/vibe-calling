@@ -111,6 +111,23 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertIsNotNone(match, "index.html must contain its self-contained app script")
         self.assertEqual(source, match.group(1).strip())
 
+    def test_live_agent_streaming_and_activity_ui_are_present(self):
+        root = Path(__file__).resolve().parents[1]
+        app = (root / "app.js").read_text(encoding="utf-8")
+        server = (root / "server.py").read_text(encoding="utf-8")
+        html = (root / "index.html").read_text(encoding="utf-8")
+        css = (root / "styles.css").read_text(encoding="utf-8")
+        self.assertIn("async function apiStream", app)
+        self.assertIn("Provider does not support streaming", app)
+        self.assertIn("reasoning_summary", app)
+        self.assertIn("agentLiveReasoning", app)
+        self.assertIn("agentLiveToolList", app)
+        self.assertIn("self.handle_streaming_proxy(request)", server)
+        self.assertIn("text/event-stream", server)
+        self.assertIn("agent-live-reasoning", css)
+        self.assertIn("agentLiveReasoning", html)
+        self.assertIn("agentLivePlan", html)
+
     def test_new_workspace_tools_are_registered(self):
         root = Path(__file__).resolve().parents[1]
         app = (root / "app.js").read_text(encoding="utf-8")

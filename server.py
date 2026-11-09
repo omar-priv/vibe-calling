@@ -1105,6 +1105,10 @@ class Handler(SimpleHTTPRequestHandler):
             headers[custom_name] = custom_value
 
         request = urllib.request.Request(target_url, data=body, headers=headers, method=method)
+        if method == "POST" and isinstance(payload.get("body"), dict) and payload["body"].get("stream") is True:
+            self.handle_streaming_proxy(request)
+            return
+
         try:
             with OPENER.open(request, timeout=90) as response:
                 response_body = response.read(MAX_RESPONSE_BYTES + 1)
@@ -1129,6 +1133,68 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(response_body)))
         self.end_headers()
         self.wfile.write(response_body)
+
+    def handle_streaming_proxy(self, request):
+        """Relay an OpenAI-compatible SSE response without buffering the full model turn."""
+        try:
+            response = OPENER.open(request, timeout=90)
+        except urllib.error.HTTPError as exc:
+            raw = exc.read(512 * 1024)
+            self.send_response(exc.code)
+            self.send_header("Content-Type", exc.headers.get("Content-Type", "application/json"))
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+        except urllib.error.URLError as exc:
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                raise TimeoutError("The provider connection timed out before streaming began.") from exc
+            raise ConnectionError("Could not reach provider: " + str(exc.reason)) from exc
+
+        with response:
+            content_type = response.headers.get("Content-Type", "text/event-stream")
+            if response.status >= 400:
+                raw = response.read(512 * 1024)
+                self.send_response(response.status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
+            if "text/event-stream" not in content_type.lower():
+                raw = response.read(MAX_RESPONSE_BYTES + 1)
+                self.send_response(response.status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
+            self.send_response(response.status)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            total = 0
+            while True:
+                # read1 returns currently available bytes instead of waiting for a full 4 KB buffer.
+                chunk = response.read1(4096) if hasattr(response, "read1") else response.read(4096)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_RESPONSE_BYTES:
+                    try:
+                        self.wfile.write(b'data: {"error":{"message":"Provider stream exceeded the 32 MB local limit."}}\n\n')
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass
+                    break
+                try:
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    # The user pressed Stop or closed the stream; end quietly.
+                    return
 
     def send_json(self, status, value):
         data = json_bytes(value)
