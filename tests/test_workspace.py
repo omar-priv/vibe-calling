@@ -118,6 +118,7 @@ class FrontendBundleTests(unittest.TestCase):
         html = (root / "index.html").read_text(encoding="utf-8")
         css = (root / "styles.css").read_text(encoding="utf-8")
         self.assertIn("async function apiStream", app)
+        self.assertIn("Provider does not support streaming", app)
         self.assertIn("reasoning_summary", app)
         self.assertIn("agentLiveReasoning", app)
         self.assertIn("agentLiveToolList", app)
