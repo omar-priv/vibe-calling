@@ -37,12 +37,13 @@ function markdown(s){
  let x=esc(s),fence=String.fromCharCode(96).repeat(3);
  x=x.replace(new RegExp(fence+"([\\w-]*)\\n([\\s\\S]*?)"+fence,"g"),(_,l,c)=>"<pre><code>"+c+"</code></pre>");
  x=x.replace(/^### (.*)$/gm,"<h3>$1</h3>").replace(/^## (.*)$/gm,"<h2>$1</h2>").replace(/^# (.*)$/gm,"<h1>$1</h1>").replace(/\\*\\*(.*?)\\*\\*/g,"<b>$1</b>");
- const downloadPattern=new RegExp(String.raw`\\[([^\\]]+)\\]\\((\\/api\\/download\\/[^)\\s]+)\\)`,"g");
+ const downloadPattern=/\[([^\]]+)\]\((\/api\/download\/[^)\s]+)\)/g;
  x=x.replace(downloadPattern,'<a class="file-download" href="$2" download>$1</a>');
  return x.split(/\\n{2,}/).map(p=>p.startsWith("<pre>")||p.startsWith("<h")?p:"<p>"+p.replace(/\\n/g,"<br>")+"</p>").join("");
 }
 function renderChat(){
- const box=$("#messages"),welcome=$("#welcome"),c=current();
+ const box=$("#messages"),welcome=$("#welcome"),c=current(),chatBox=$("#chatContent");
+ const nearBottom=chatBox.scrollHeight-chatBox.scrollTop-chatBox.clientHeight<140;
  if(!c){box.innerHTML="";welcome.style.display="block";return}
  const arr=Array.isArray(c.messages)?c.messages:[];
  welcome.style.display=arr.length?"none":"block";
@@ -55,7 +56,7 @@ function renderChat(){
   (user?"":'<div class="message-actions"><button type="button" data-copy="'+esc(m.content||"")+'">Copy</button><button type="button" data-retry="'+i+'">Regenerate</button></div>')+
   '</div></article>';
  }).join("");
- $("#chatContent").scrollTo(0,$("#chatContent").scrollHeight);
+ if(nearBottom)chatBox.scrollTo(0,chatBox.scrollHeight);
 }
 function openProvider(providerId){pendingModels=[];editingId=providerId||null;const p=providerId?byId(providerId):null;$("#providerDialogTitle").textContent=p?"Edit provider":"Add a provider";$("#providerPreset").value="custom";$("#providerName").value=p?.name||"";$("#providerUrl").value=p?.baseUrl||"";$("#providerKey").value=p?.apiKey||"";$("#providerModel").value=p?.defaultModel||"";$("#providerHeader").value=p?.customHeader||"";$("#providerHeaderValue").value=p?.customHeaderValue||"";$("#providerFeedback").textContent="";$("#providerFeedback").className="feedback";$("#providerDialog").showModal()}
 function providerFromForm(){return{id:editingId||uid(),name:$("#providerName").value.trim()||"My provider",baseUrl:cleanUrl($("#providerUrl").value),apiKey:$("#providerKey").value.trim(),defaultModel:$("#providerModel").value.trim(),models:pendingModels.length?pendingModels:(editingId?(byId(editingId)?.models||[]):[]),customHeader:$("#providerHeader").value.trim(),customHeaderValue:$("#providerHeaderValue").value}}
@@ -66,6 +67,18 @@ function providerHost(p){try{return new URL(p.baseUrl).hostname.toLowerCase()}ca
 function hasZeroPricing(row){const pricing=row?.pricing;if(!pricing||typeof pricing!=="object")return false;const vals=["prompt","completion","input","output"].map(k=>pricing[k]).filter(v=>v!==undefined);return vals.length>=2&&vals.every(v=>Number(v)===0)}
 function isVerifiedFreeModel(p,row){const id=String(row?.id||row?.name||"").replace(/^models\\//,""),host=providerHost(p);if(host==="generativelanguage.googleapis.com"||host.endsWith(".googleapis.com"))return GEMINI_FREE_MODELS.has(id);if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return id.endsWith(":free")||hasZeroPricing(row);return hasZeroPricing(row)}
 async function discover(p){const d=await api(p,"/models"),rows=d.data||d.models||[];return rows.filter(x=>isVerifiedFreeModel(p,x)).map(x=>String(x.id||x.name||"").replace(/^models\\//,"")).filter(Boolean)}
+function filterSavedFreeModels(){
+ providers=providers.map(p=>{
+  const host=providerHost(p);
+  const allowed=(Array.isArray(p.models)?p.models:[]).filter(id=>{
+   if(host==="generativelanguage.googleapis.com"||host.endsWith(".googleapis.com"))return GEMINI_FREE_MODELS.has(String(id).replace(/^models\\//,""));
+   if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return String(id).endsWith(":free");
+   return false;
+  });
+  return {...p,models:allowed,defaultModel:allowed.includes(p.defaultModel)?p.defaultModel:""};
+ });
+ try{write(KEYS.providers,providers)}catch{}
+}
 async function refresh(id){const p=byId(id);if(!p)return;toast("Checking free models…");try{p.models=await discover(p);if(p.defaultModel&&!p.models.includes(p.defaultModel))p.defaultModel="";saveProviders();toast("Found "+p.models.length+" verified free model(s)")}catch(e){toast("Model list failed: "+e.message)}}
 async function testProvider(){
   const p=providerFromForm(),fb=$("#providerFeedback"),button=$("#testProvider");
@@ -369,7 +382,7 @@ $("#messageInput").addEventListener("input",e=>{e.target.style.height="auto";e.t
 $("#agentToggle").addEventListener("change",e=>{$("#toolState").textContent=e.target.checked?"on":"off"});
 $("#projectSelect").addEventListener("change",e=>{setActiveProject(e.target.value);refreshWorkspacePanel()});
 $("#skillFileInput").addEventListener("change",async e=>{for(const file of [...e.target.files])await installSkillFile(file);e.target.value=""});
-function init(){try{renderProviders();renderModels();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();console.info("Vibe Calling initialized")}catch(e){fatal(e.stack||e.message||String(e))}}
+function init(){try{filterSavedFreeModels();renderProviders();renderModels();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();console.info("Vibe Calling initialized");if(mcpConfig.connected&&mcpConfig.token)connectGitHubMcp()}catch(e){fatal(e.stack||e.message||String(e))}}
 init();
 window.__vibeAppReady = true;
 document.documentElement.dataset.vibeApp = 'ready';
