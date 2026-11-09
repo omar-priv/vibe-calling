@@ -72,7 +72,7 @@ Not yet. The committed .vscode/mcp.json is for MCP-compatible host applications 
 ## Useful official references
 
 - [MCP architecture](https://modelcontextprotocol.io/docs/learn/architecture)
-- [MCP specification](https://modelcontextprotocol.io/specification/2025-11-25)
+- [MCP specification](https://modelcontextprotocol.io/specification/2026-07-28)
 - [GitHub MCP remote server](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md)
 - [GitHub MCP configuration guide](https://github.com/github/github-mcp-server/blob/main/docs/server-configuration.md)
 - [GitHub MCP setup for Codex](https://github.com/github/github-mcp-server/blob/main/docs/installation-guides/install-codex.md)
