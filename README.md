@@ -88,7 +88,7 @@ See [docs/agent-tools-and-mcp.md](docs/agent-tools-and-mcp.md) for the setup and
 - Chat completions are non-streaming.
 - Provider support for tool calls and images varies. A non-vision model may reject image attachments.
 - Chat attachments do not yet support PDF, Word, audio, or video files.
-- Project preview serves a static `index.html`. Dynamic frameworks that require long-running dev servers are not yet previewed automatically.
+- Static projects can be previewed from `index.html`. The workspace can also start supported Vite, Next.js, FastAPI, and Flask development servers after explicit approval. Other runtimes are not automatically supported.
 - Browser-testing skill guides testing, but this edition does not include a real browser automation engine or server-hosted computer use.
 - Remote Browser / Computer Use is a planned Beta panel only; no browser session is currently running on a server.
 - Free-model discovery is conservative. Providers that do not disclose free pricing may return an empty model list rather than showing unverified paid models.
@@ -99,7 +99,7 @@ See [docs/agent-tools-and-mcp.md](docs/agent-tools-and-mcp.md) for the setup and
 - `index.html` — interface and embedded application script.
 - `app.js` — editable source of the embedded application script; keep both copies synchronized.
 - `styles.css` — visual system and layout.
-- `server.py` — local server, provider proxy, skill manager, attachments, downloads, GitHub MCP, and remote MCP transport.
+- `server.py` — local server, provider proxy, skill manager, attachments, downloads, project memory/runtime controls, GitHub MCP, and remote MCP transport.
 - `skills/` — built-in agent skills.
 - `user_skills/` — imported personal skills (ignored by Git).
 - `projects/` — agent-created projects and chat uploads.
