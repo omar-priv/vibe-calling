@@ -119,7 +119,10 @@ class FrontendBundleTests(unittest.TestCase):
             "workspace_write_file", "workspace_delete_file", "workspace_run_command",
             "workspace_preview", "workspace_start_project", "workspace_stop_project",
             "workspace_project_status", "workspace_read_memory", "workspace_update_memory",
-            "runAgentLoop", "relevantSkillInstructions", "skill_list", "skill_read", "workspace_download_file",
+            "runAgentLoop", "relevantSkillInstructions", "saveAgentResume", "continueAgentRun",
+            "sessionStorage", "workspace_start_project", "workspace_stop_project",
+            "workspace_read_memory", "workspace_update_memory",
+            "if(data.exit_code!==0)", "skill_list", "skill_read", "workspace_download_file",
             "upload_attachment", "read_attachment_base64", "connectGitHubMcp",
             "connectRemoteMcp", "callRemoteMcpTool", "NVIDIA_FREE_CHAT_MODELS",
         ):
