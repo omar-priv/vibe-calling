@@ -631,7 +631,7 @@ def run_project_command(project_id, command):
         )
     if not allowed:
         raise ValueError(
-            "Command is not in the safe allowlist. Allowed: npm install/ci, npm run build/test/lint, "
+            "Command is not in the safe allowlist. Allowed: npm install/ci, npm run build/test/lint/typecheck, "
             "npx playwright test, python -m compileall/pytest/unittest, python -m pip install -r requirements.txt, and read-only git status/diff/log."
         )
     if any(not SAFE_COMMAND_TOKEN_RE.fullmatch(arg) or ".." in arg or arg.startswith("/") for arg in args):
