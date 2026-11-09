@@ -129,3 +129,25 @@ The remote URL is validated for HTTPS and public network addressing. Localhost a
 Read-only mode allows only tools explicitly marked `readOnlyHint: true`. Other tools are blocked until read-only mode is turned off; each write-capable or unclassified tool call then needs a separate confirmation. A remote server may not enforce the Vibe Calling UI's policy itself, so keep server permissions and token scopes narrow.
 
 This connector targets **remote Streamable HTTP**. A local MCP server that requires `stdio` must be launched and supervised by a local process manager; entering its command into this URL field will not work. Remote Browser / Computer Use remains a separate planned Beta feature.
+
+
+## Agent execution, continuation, project runtime, and memory
+
+Agent mode now preloads up to three relevant built-in skills for the current request. Skill IDs are instructions, not function calls: the agent reads them with `skill_read({id})`. If a model mistakenly emits a built-in skill ID as a tool name, the client resolves it by reading that skill instead of treating it as an unknown tool.
+
+The agent has a bounded 24-step tool cycle. When the cycle ends without a final answer, or the provider/network request fails after the task context is created, the application preserves the conversation history, provider/model selection, tool results, and next step in the current browser session. A **Continue task** action resumes that state. The **Stop** control aborts the current request; completed project file changes remain saved. A provider must still be configured in the browser to resume a task.
+
+Each project can store a small JSON memory file at `.vibe/memory.json`. This folder is hidden from normal project file listings and is not exposed to ordinary workspace read/write tools. The memory contains the goal, summary, stack, decisions, completed work, and next steps. Use `workspace_read_memory` and `workspace_update_memory` to maintain it across separate conversations and sessions on the same local workspace.
+
+### Running a project
+
+The workspace can start supported project development servers after a user confirmation:
+
+- Vite projects using an npm `dev` or `start` script.
+- Next.js projects using an npm `dev` or `start` script.
+- Python FastAPI projects with a conventional `app` object, using Uvicorn.
+- Python Flask projects using the Flask CLI.
+
+The server binds to `127.0.0.1` on a dynamically selected port. Readiness is confirmed by an actual TCP connection before a start operation reports success. The Agent tools workspace panel can display the project runtime and memory, and provides Start app / Stop app controls. The server tracks child process groups so stopping a project also stops its development-server subprocesses. Projects with unrecognized Python or Node entry points are not reported as ready; add a static `index.html` for static preview or use a supported development server.
+
+Build/test/package installation commands remain allowlisted and require explicit per-command approval. `python -m pip install -r requirements.txt` is supported only when that file exists in the selected project. A command with a non-zero exit code is returned to the model as a failed tool result, not as a successful tool call.
