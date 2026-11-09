@@ -40,10 +40,10 @@ function renderProviders(){const grid=$("#providerGrid");if(!grid)return;if(!pro
 function markdown(s){
  let x=esc(s),fence=String.fromCharCode(96).repeat(3);
  x=x.replace(new RegExp(fence+"([\\w-]*)\\n([\\s\\S]*?)"+fence,"g"),(_,l,c)=>"<pre><code>"+c+"</code></pre>");
- x=x.replace(/^### (.*)$/gm,"<h3>$1</h3>").replace(/^## (.*)$/gm,"<h2>$1</h2>").replace(/^# (.*)$/gm,"<h1>$1</h1>").replace(/\\*\\*(.*?)\\*\\*/g,"<b>$1</b>");
+ x=x.replace(/^### (.*)$/gm,"<h3>$1</h3>").replace(/^## (.*)$/gm,"<h2>$1</h2>").replace(/^# (.*)$/gm,"<h1>$1</h1>").replace(/\*\*(.*?)\*\*/g,"<b>$1</b>");
  const downloadPattern=/\[([^\]]+)\]\((\/api\/download\/[^)\s]+)\)/g;
  x=x.replace(downloadPattern,'<a class="file-download" href="$2" download>$1</a>');
- return x.split(/\\n{2,}/).map(p=>p.startsWith("<pre>")||p.startsWith("<h")?p:"<p>"+p.replace(/\\n/g,"<br>")+"</p>").join("");
+ return x.split(/\n{2,}/).map(p=>p.startsWith("<pre>")||p.startsWith("<h")?p:"<p>"+p.replace(/\n/g,"<br>")+"</p>").join("");
 }
 function renderChat(){
  const box=$("#messages"),welcome=$("#welcome"),c=current(),chatBox=$("#chatContent");
@@ -75,11 +75,7 @@ async function discover(p){const d=await api(p,"/models"),rows=d.data||d.models|
 function filterSavedFreeModels(){
  providers=providers.map(p=>{
   const host=providerHost(p);
-  const allowed=(Array.isArray(p.models)?p.models:[]).filter(id=>{
-   if(host==="generativelanguage.googleapis.com"||host.endsWith(".googleapis.com"))return GEMINI_FREE_MODELS.has(String(id).replace(/^models\\//,""));
-   if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return String(id).endsWith(":free");
-   return false;
-  });
+  const allowed=(Array.isArray(p.models)?p.models:[]).filter(id=>isStoredFreeModel(p,id));
   return {...p,models:allowed,defaultModel:isStoredFreeModel(p,p.defaultModel)?p.defaultModel:""};
  });
  try{write(KEYS.providers,providers)}catch{}
@@ -183,12 +179,12 @@ async function callGithubMcpTool(functionName,args){
  const isReadOnly=tool.annotations?.readOnlyHint===true;
  if(!isReadOnly){
   if(mcpConfig.readOnly)throw new Error("GitHub MCP is read-only. Enable write access in Agent tools and reconnect.");
-  if(!confirm("The agent wants to run a GitHub action that may change a repository.\\n\\nTool: "+tool.name+"\\n\\nAllow this action?"))return "User declined this GitHub write action.";
+  if(!confirm("The agent wants to run a GitHub action that may change a repository.\n\nTool: "+tool.name+"\n\nAllow this action?"))return "User declined this GitHub write action.";
  }
  const data=await githubMcpRequest({jsonrpc:"2.0",id:Math.floor(Date.now()%1000000000)+10,method:"tools/call",params:{name:tool.name,arguments:args||{}}});
  if(data.response?.error)throw new Error(data.response.error.message||"GitHub MCP tool failed.");
  const result=data.response?.result||{},pieces=(result.content||[]).filter(x=>x.type==="text").map(x=>x.text||"");
- return (pieces.join("\\n")||JSON.stringify(result.structuredContent||result)).slice(0,24000);
+ return (pieces.join("\n")||JSON.stringify(result.structuredContent||result)).slice(0,24000);
 }
 async function workspaceRequest(payload){
  const response=await fetch("/api/workspace",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
@@ -226,7 +222,7 @@ async function refreshWorkspacePanel(){
 }
 aasync function runTool(name,a){
  if(name.startsWith("mcp_github_"))return callGithubMcpTool(name,a);
- if(name==="skill_list"){const data=await skillsRequest({action:"list"});return data.skills.map(sk=>sk.id+" · "+sk.name+" — "+sk.description).join("\\n")||"No skills are installed."}
+ if(name==="skill_list"){const data=await skillsRequest({action:"list"});return data.skills.map(sk=>sk.id+" · "+sk.name+" — "+sk.description).join("\n")||"No skills are installed."}
  if(name==="skill_read")return readSkill(a.id);
  if(name==="workspace_download_file"){const project=String(a.project||activeProject||""),filePath=String(a.path||"");if(!project||!filePath)throw Error("Project and file path are required.");const url="/api/download/"+encodeURIComponent(project)+"/"+filePath.split("/").map(encodeURIComponent).join("/");return "The file is ready for download: ["+filePath.split("/").pop()+"]("+url+")"}
  if(name==="calculator")return calculate(a.expression||"");
@@ -308,7 +304,7 @@ async function buildHistoryWithAttachments(messages,systemMessage){
     parts.push({type:"image_url",image_url:{url:"data:"+(file.mime||a.mime)+";base64,"+file.content_base64}});
    }else{
     const file=await workspaceRequest({action:"read_file",project:a.project,path:a.path});
-    parts[0].text+="\\n\\n[Attached file: "+a.name+"]\\n"+file.content+"\\n[End of "+a.name+"]";
+    parts[0].text+="\n\n[Attached file: "+a.name+"]\n"+file.content+"\n[End of "+a.name+"]";
    }
   }
   history.push({role:"user",content:parts});
