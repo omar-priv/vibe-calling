@@ -73,3 +73,15 @@ The reliability branch adds:
 - Command failure propagation so non-zero exit codes reach the model as tool failures.
 
 Automated Python/Node checks and browser interactions must be reported from the actual CI run. This repository update has not been tested in the user's local Windows environment or with their NVIDIA API key. The local-only server is still bound to `127.0.0.1`; public hosting is not part of this reliability test.
+
+
+## Live Agent activity smoke test
+
+1. Select an OpenAI-compatible provider/model that supports streaming and enable Agent Mode.
+2. Ask the agent to inspect a project, make a small change, and run a test.
+3. Confirm the activity panel appears immediately.
+4. Confirm assistant commentary appears under **Live response / plan** while tokens arrive.
+5. If the provider returns an explicit reasoning summary, confirm it appears separately under **Model reasoning summary**. If it does not, the section should remain hidden; do not fabricate reasoning.
+6. Confirm each actual tool call appears in the execution log and changes to completed/failed when the tool returns.
+7. Confirm Stop cancels an in-flight stream, Continue task still resumes a paused task, and the final assistant answer is displayed normally.
+8. Repeat with a provider that does not support streaming; verify a clear error or JSON compatibility fallback and no false claim of live reasoning.
