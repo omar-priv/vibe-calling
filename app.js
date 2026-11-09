@@ -212,7 +212,8 @@ async function connectGitHubMcp(){
 }
 function buildAgentTools(){
  const remote=Object.entries(githubMcpToolMap).map(([fn,tool])=>({type:"function",function:{name:fn,description:String(tool.description||tool.title||tool.name).slice(0,900),parameters:tool.inputSchema||{type:"object",properties:{}}}}));
- return tools.concat(remote);
+ const remoteCustom=Object.entries(remoteMcpToolMap).map(([fn,tool])=>({type:"function",function:{name:fn,description:String(tool.description||tool.title||tool.name).slice(0,900),parameters:tool.inputSchema||{type:"object",properties:{}}}}));
+ return tools.concat(remote,remoteCustom);
 }
 async function callGithubMcpTool(functionName,args){
  const tool=githubMcpToolMap[functionName];if(!tool)throw new Error("GitHub MCP tool is unavailable. Reconnect GitHub MCP.");
@@ -224,6 +225,56 @@ async function callGithubMcpTool(functionName,args){
  const data=await githubMcpRequest({jsonrpc:"2.0",id:Math.floor(Date.now()%1000000000)+10,method:"tools/call",params:{name:tool.name,arguments:args||{}}});
  if(data.response?.error)throw new Error(data.response.error.message||"GitHub MCP tool failed.");
  const result=data.response?.result||{},pieces=(result.content||[]).filter(x=>x.type==="text").map(x=>x.text||"");
+ return (pieces.join("\n")||JSON.stringify(result.structuredContent||result)).slice(0,24000);
+}
+
+function saveRemoteMcpConfig(){write(KEYS.remoteMcp,remoteMcpConfig);renderRemoteMcpStatus()}
+function renderRemoteMcpStatus(){
+ const name=$("#remoteMcpName"),url=$("#remoteMcpUrl"),token=$("#remoteMcpToken"),readOnly=$("#remoteMcpReadOnly"),status=$("#remoteMcpStatus");
+ if(name&&document.activeElement!==name)name.value=remoteMcpConfig.name||"";
+ if(url&&document.activeElement!==url)url.value=remoteMcpConfig.url||"";
+ if(token&&document.activeElement!==token)token.value=remoteMcpConfig.token||"";
+ if(readOnly)readOnly.checked=remoteMcpConfig.readOnly!==false;
+ if(status)status.textContent=remoteMcpConfig.connected?(remoteMcpTools.length+" tools connected · "+(remoteMcpConfig.readOnly?"read-only":"writes require confirmation")):"Not connected. Enter a remote HTTPS MCP endpoint and connect.";
+}
+async function remoteMcpRequest(message){
+ const response=await fetch("/api/mcp/remote",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:remoteMcpConfig.url,token:remoteMcpConfig.token||"",session_id:remoteMcpConfig.sessionId||"",read_only:remoteMcpConfig.readOnly!==false,message})});
+ const raw=await response.text();let data={};try{data=raw?JSON.parse(raw):{}}catch{}
+ if(!response.ok||data.ok===false)throw new Error(data.error||("Remote MCP returned HTTP "+response.status));
+ if(data.session_id)remoteMcpConfig.sessionId=data.session_id;return data;
+}
+function saveRemoteMcpSettings(){
+ remoteMcpConfig={name:$("#remoteMcpName").value.trim()||"Remote MCP",url:$("#remoteMcpUrl").value.trim(),token:$("#remoteMcpToken").value.trim(),readOnly:$("#remoteMcpReadOnly").checked,sessionId:"",connected:false};
+ remoteMcpTools=[];remoteMcpToolMap={};saveRemoteMcpConfig();toast("Remote MCP settings saved. Connect to apply.");
+}
+async function connectRemoteMcp(){
+ const url=$("#remoteMcpUrl")?.value.trim()||remoteMcpConfig.url||"";
+ const name=$("#remoteMcpName")?.value.trim()||remoteMcpConfig.name||"Remote MCP";
+ const token=$("#remoteMcpToken")?.value.trim()??remoteMcpConfig.token??"";
+ if(!url){toast("Enter your MCP server HTTPS URL first.");return}
+ if(!/^https:\/\//i.test(url)){toast("Remote MCP servers must use HTTPS.");return}
+ remoteMcpConfig={name,url,token,readOnly:$("#remoteMcpReadOnly")?.checked!==false,sessionId:"",connected:false};
+ remoteMcpTools=[];remoteMcpToolMap={};saveRemoteMcpConfig();
+ try{
+  const init=await remoteMcpRequest({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2025-03-26",capabilities:{},clientInfo:{name:"Vibe Calling",version:"0.3.0"}}});
+  if(init.response?.error)throw new Error(init.response.error.message||"MCP initialization failed.");
+  await remoteMcpRequest({jsonrpc:"2.0",method:"notifications/initialized",params:{}});
+  const listed=await remoteMcpRequest({jsonrpc:"2.0",id:2,method:"tools/list",params:{}});
+  if(listed.response?.error)throw new Error(listed.response.error.message||"Could not list remote MCP tools.");
+  remoteMcpTools=(listed.response?.result?.tools||[]).slice(0,40);remoteMcpToolMap={};
+  remoteMcpTools.forEach((tool,index)=>{const safeServer=String(name).replace(/[^a-zA-Z0-9_]/g,"_").slice(0,10)||"server";const safeTool=String(tool.name||("tool_"+index)).replace(/[^a-zA-Z0-9_]/g,"_").slice(0,38);remoteMcpToolMap["mcp_remote_"+safeServer+"_"+safeTool]=tool});
+  remoteMcpConfig.connected=true;saveRemoteMcpConfig();toast("Remote MCP connected · "+remoteMcpTools.length+" tools");
+ }catch(error){remoteMcpConfig.connected=false;saveRemoteMcpConfig();toast("Remote MCP connection failed: "+error.message)}
+}
+async function callRemoteMcpTool(functionName,args){
+ const tool=remoteMcpToolMap[functionName];if(!tool)throw new Error("Remote MCP tool is unavailable. Reconnect the server.");
+ if(tool.annotations?.readOnlyHint!==true){
+  if(remoteMcpConfig.readOnly)throw new Error("Remote MCP is read-only. Enable writes in Agent tools and reconnect.");
+  if(!confirm("The agent wants to run a remote MCP action that may change external data.\n\nServer: "+remoteMcpConfig.name+"\nTool: "+tool.name+"\n\nAllow this action?"))return "User declined this remote MCP write action.";
+ }
+ const data=await remoteMcpRequest({jsonrpc:"2.0",id:Math.floor(Date.now()%1000000000)+20,method:"tools/call",params:{name:tool.name,arguments:args||{}}});
+ if(data.response?.error)throw new Error(data.response.error.message||"Remote MCP tool failed.");
+ const result=data.response?.result||{},pieces=(result.content||[]).filter(item=>item.type==="text").map(item=>item.text||"");
  return (pieces.join("\n")||JSON.stringify(result.structuredContent||result)).slice(0,24000);
 }
 async function workspaceRequest(payload){
@@ -262,6 +313,7 @@ async function refreshWorkspacePanel(){
 }
 async function runTool(name,a){
  if(name.startsWith("mcp_github_"))return callGithubMcpTool(name,a);
+ if(name.startsWith("mcp_remote_"))return callRemoteMcpTool(name,a);
  if(name==="skill_list"){const data=await skillsRequest({action:"list"});return data.skills.map(sk=>sk.id+" · "+sk.name+" — "+sk.description).join("\n")||"No skills are installed."}
  if(name==="skill_read")return readSkill(a.id);
  if(name==="workspace_download_file"){const project=String(a.project||activeProject||""),filePath=String(a.path||"");if(!project||!filePath)throw Error("Project and file path are required.");const url="/api/download/"+encodeURIComponent(project)+"/"+filePath.split("/").map(encodeURIComponent).join("/");return "The file is ready for download: ["+filePath.split("/").pop()+"]("+url+")"}
@@ -373,6 +425,9 @@ if(b.id==="testProvider"){testProvider();return}
 if(b.id==="createProjectBtn"){(async()=>{const input=$("#projectNameInput"),name=input.value.trim();if(!name){toast("Enter a project name first.");return}try{const data=await workspaceRequest({action:"create_project",name});setActiveProject(data.project);input.value="";await refreshWorkspacePanel();toast("Project created: "+data.project)}catch(error){toast(error.message)}})();return}
 if(b.id==="refreshWorkspaceBtn"){refreshWorkspacePanel();return}
 if(b.id==="connectGithubMcp"){connectGitHubMcp();return}
+if(b.dataset.addNvidiaModel){chooseNvidiaModel(b.dataset.addNvidiaModel);return}
+if(b.id==="saveRemoteMcpSettings"){saveRemoteMcpSettings();return}
+if(b.id==="connectRemoteMcp"){connectRemoteMcp();return}
 if(b.id==="saveMcpSettings"){mcpConfig.token=$("#githubPatInput").value.trim();mcpConfig.readOnly=$("#githubReadOnly").checked;mcpConfig.connected=false;mcpConfig.sessionId="";githubMcpTools=[];githubMcpToolMap={};saveMcpConfig();toast("GitHub MCP settings saved. Reconnect to apply.");return}
 if(b.id==="uploadSkillBtn"){$("#skillFileInput").click();return}
 if(b.dataset.skillRead){readSkill(b.dataset.skillRead).then(content=>{const w=window.open("","_blank");if(w){const pre=w.document.createElement("pre");pre.textContent=content;pre.style.cssText="white-space:pre-wrap;font:14px/1.6 monospace;padding:24px";w.document.body.appendChild(pre)}else toast("Pop-up blocked")}).catch(error=>toast(error.message));return}
@@ -380,7 +435,7 @@ if(b.dataset.removeAttachment!==undefined){pendingAttachments.splice(Number(b.da
 if(b.id==="previewProjectBtn"){(async()=>{const tab=window.open("about:blank","_blank");try{if(!activeProject)throw Error("Select a project first.");const data=await workspaceRequest({action:"preview",project:activeProject});if(tab)tab.location=data.url;else toast(data.url)}catch(error){if(tab)tab.close();toast(error.message)}})();return}
 if(b.id==="clearHistory"){if(confirm("Clear all conversations?")){chats=[];chatId=null;saveChats();renderChat()}return}
 if(b.id==="clearAll"){$("#confirmDialog").showModal();return}
-if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));providers=[];chats=[];notes=[];chatId=null;$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
+if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));providers=[];chats=[];notes=[];chatId=null;remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};remoteMcpTools=[];remoteMcpToolMap={};$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
 if(b.id==="chatOptions"){toast("More options coming soon.");return}
 if(b.dataset.view){setView(b.dataset.view);return}
 if(b.dataset.close){$("#"+b.dataset.close)?.close();return}
@@ -423,7 +478,7 @@ $("#messageInput").addEventListener("input",e=>{e.target.style.height="auto";e.t
 $("#agentToggle").addEventListener("change",e=>{$("#toolState").textContent=e.target.checked?"on":"off"});
 $("#projectSelect").addEventListener("change",e=>{setActiveProject(e.target.value);refreshWorkspacePanel()});
 $("#skillFileInput").addEventListener("change",async e=>{for(const file of [...e.target.files])await installSkillFile(file);e.target.value=""});
-function init(){try{filterSavedFreeModels();renderProviders();renderModels();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();console.info("Vibe Calling initialized");if(mcpConfig.connected&&mcpConfig.token)connectGitHubMcp()}catch(e){fatal(e.stack||e.message||String(e))}}
+function init(){try{filterSavedFreeModels();renderProviders();renderModels();renderNvidiaCatalog();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();renderRemoteMcpStatus();console.info("Vibe Calling initialized");if(mcpConfig.connected&&mcpConfig.token)connectGitHubMcp();if(remoteMcpConfig.connected&&remoteMcpConfig.url)connectRemoteMcp()}catch(e){fatal(e.stack||e.message||String(e))}}
 init();
 window.__vibeAppReady = true;
 document.documentElement.dataset.vibeApp = 'ready';
