@@ -7,7 +7,7 @@ const presets={custom:{name:"Custom provider",url:"",model:""},nvidia:{name:"NVI
 const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
 let providers=read(KEYS.providers,[]),chats=read(KEYS.chats,[]),notes=read(KEYS.notes,[]);
 if(!Array.isArray(providers))providers=[];if(!Array.isArray(chats))chats=[];if(!Array.isArray(notes))notes=[];
-let chatId=chats[0]?.id||null,editingId=null,busy=false,controller=null,pendingModels=[];
+let chatId=chats[0]?.id||null,editingId=null,busy=false,controller=null,pendingModels=[],pendingFreeSource="";
 let mcpConfig=read(KEYS.mcp,{token:"",readOnly:true,sessionId:"",connected:false});
 if(!mcpConfig||typeof mcpConfig!=="object")mcpConfig={token:"",readOnly:true,sessionId:"",connected:false};
 let githubMcpTools=[],githubMcpToolMap={},skillCatalog=[],pendingAttachments=[];
@@ -26,7 +26,11 @@ function newChat(){const c={id:uid(),title:"New conversation",messages:[],create
 function renderHistory(){const el=$("#historyList");el.innerHTML=chats.slice(0,50).map(c=>'<button type="button" class="history-item '+(c.id===chatId?"active":"")+'" data-chat="'+esc(c.id)+'">'+esc(c.title||"Conversation")+'</button>').join("")}
 function renderModels(preferred){
  const el=$("#modelSelect"),old=preferred||el.value,opts=[];
- providers.forEach(p=>(Array.isArray(p.models)?p.models:[]).filter(Boolean).forEach(m=>opts.push({value:p.id+"::"+m,label:(p.name||"Provider")+" · "+m+" · FREE"})));
+ providers.forEach(p=>{
+  const models=[...(Array.isArray(p.models)?p.models:[])];
+  if(p.defaultModel&&isStoredFreeModel(p,p.defaultModel))models.push(p.defaultModel);
+  [...new Set(models)].filter(Boolean).forEach(m=>opts.push({value:p.id+"::"+m,label:(p.name||"Provider")+" · "+m+" · FREE"}));
+ });
  el.innerHTML=opts.length?opts.map(o=>'<option value="'+esc(o.value)+'">'+esc(o.label)+'</option>').join(""):'<option value="">No verified free models found</option>';
  if(opts.some(o=>o.value===old))el.value=old;
  $("#tokenHint").textContent=opts.length?opts.length+" verified free model(s)":"Free models only · unverified models are hidden";
@@ -58,14 +62,15 @@ function renderChat(){
  }).join("");
  if(nearBottom)chatBox.scrollTo(0,chatBox.scrollHeight);
 }
-function openProvider(providerId){pendingModels=[];editingId=providerId||null;const p=providerId?byId(providerId):null;$("#providerDialogTitle").textContent=p?"Edit provider":"Add a provider";$("#providerPreset").value="custom";$("#providerName").value=p?.name||"";$("#providerUrl").value=p?.baseUrl||"";$("#providerKey").value=p?.apiKey||"";$("#providerModel").value=p?.defaultModel||"";$("#providerHeader").value=p?.customHeader||"";$("#providerHeaderValue").value=p?.customHeaderValue||"";$("#providerFeedback").textContent="";$("#providerFeedback").className="feedback";$("#providerDialog").showModal()}
-function providerFromForm(){return{id:editingId||uid(),name:$("#providerName").value.trim()||"My provider",baseUrl:cleanUrl($("#providerUrl").value),apiKey:$("#providerKey").value.trim(),defaultModel:$("#providerModel").value.trim(),models:pendingModels.length?pendingModels:(editingId?(byId(editingId)?.models||[]):[]),customHeader:$("#providerHeader").value.trim(),customHeaderValue:$("#providerHeaderValue").value}}
+function openProvider(providerId){pendingModels=[];editingId=providerId||null;const p=providerId?byId(providerId):null;pendingFreeSource=p?.freeModelSource||"";$("#providerDialogTitle").textContent=p?"Edit provider":"Add a provider";$("#providerPreset").value="custom";$("#providerName").value=p?.name||"";$("#providerUrl").value=p?.baseUrl||"";$("#providerKey").value=p?.apiKey||"";$("#providerModel").value=p?.defaultModel||"";$("#providerHeader").value=p?.customHeader||"";$("#providerHeaderValue").value=p?.customHeaderValue||"";$("#providerFeedback").textContent="";$("#providerFeedback").className="feedback";$("#providerDialog").showModal()}
+function providerFromForm(){return{id:editingId||uid(),name:$("#providerName").value.trim()||"My provider",baseUrl:cleanUrl($("#providerUrl").value),apiKey:$("#providerKey").value.trim(),defaultModel:$("#providerModel").value.trim(),models:pendingModels.length?pendingModels:(editingId?(byId(editingId)?.models||[]):[]),freeModelSource:pendingFreeSource,customHeader:$("#providerHeader").value.trim(),customHeaderValue:$("#providerHeaderValue").value}}
 function requestBody(p,path,method,body){return{baseUrl:cleanUrl(p.baseUrl),path,method,apiKey:p.apiKey,customHeader:p.customHeader||"",customHeaderValue:p.customHeaderValue||"",body:body??null}}
 async function api(p,path,method="GET",body=null,signal){let r;try{r=await fetch("/api/proxy",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(requestBody(p,path,method,body)),signal})}catch(e){if(e.name==="AbortError")throw e;throw new Error("Could not reach local server. Run start.bat and open http://127.0.0.1:8765")}const raw=await r.text();if(!r.ok)throw new Error("HTTP "+r.status+": "+raw.slice(0,450));try{return raw?JSON.parse(raw):{}}catch{throw new Error("Provider response is not valid JSON")}}
 const GEMINI_FREE_MODELS=new Set(["gemini-3.8-flash","gemini-3.6-flash","gemini-3.5-flash-lite","gemini-3.1-flash-lite","gemini-3-flash-preview","gemini-2.5-flash","gemini-2.5-flash-lite"]);
 function providerHost(p){try{return new URL(p.baseUrl).hostname.toLowerCase()}catch{return""}}
 function hasZeroPricing(row){const pricing=row?.pricing;if(!pricing||typeof pricing!=="object")return false;const vals=["prompt","completion","input","output"].map(k=>pricing[k]).filter(v=>v!==undefined);return vals.length>=2&&vals.every(v=>Number(v)===0)}
 function isVerifiedFreeModel(p,row){const id=String(row?.id||row?.name||"").replace(/^models\\//,""),host=providerHost(p);if(host==="generativelanguage.googleapis.com"||host.endsWith(".googleapis.com"))return GEMINI_FREE_MODELS.has(id);if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return id.endsWith(":free")||hasZeroPricing(row);return hasZeroPricing(row)}
+function isStoredFreeModel(p,id){const host=providerHost(p),model=String(id||"").replace(/^models\\//,"");if(host==="generativelanguage.googleapis.com"||host.endsWith(".googleapis.com"))return GEMINI_FREE_MODELS.has(model);if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return model.endsWith(":free");return p.freeModelSource===host&&(p.models||[]).includes(model)}
 async function discover(p){const d=await api(p,"/models"),rows=d.data||d.models||[];return rows.filter(x=>isVerifiedFreeModel(p,x)).map(x=>String(x.id||x.name||"").replace(/^models\\//,"")).filter(Boolean)}
 function filterSavedFreeModels(){
  providers=providers.map(p=>{
@@ -75,11 +80,11 @@ function filterSavedFreeModels(){
    if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return String(id).endsWith(":free");
    return false;
   });
-  return {...p,models:allowed,defaultModel:allowed.includes(p.defaultModel)?p.defaultModel:""};
+  return {...p,models:allowed,defaultModel:isStoredFreeModel(p,p.defaultModel)?p.defaultModel:""};
  });
  try{write(KEYS.providers,providers)}catch{}
 }
-async function refresh(id){const p=byId(id);if(!p)return;toast("Checking free models…");try{p.models=await discover(p);if(p.defaultModel&&!p.models.includes(p.defaultModel))p.defaultModel="";saveProviders();toast("Found "+p.models.length+" verified free model(s)")}catch(e){toast("Model list failed: "+e.message)}}
+async function refresh(id){const p=byId(id);if(!p)return;toast("Checking free models…");try{p.models=await discover(p);p.freeModelSource=providerHost(p);if(p.defaultModel&&!isStoredFreeModel(p,p.defaultModel)&&!p.models.includes(p.defaultModel))p.defaultModel="";saveProviders();toast("Found "+p.models.length+" verified free model(s)")}catch(e){toast("Model list failed: "+e.message)}}
 async function testProvider(){
   const p=providerFromForm(),fb=$("#providerFeedback"),button=$("#testProvider");
   fb.className="feedback";fb.textContent="";
@@ -89,7 +94,7 @@ async function testProvider(){
   const label=button.textContent;button.disabled=true;button.textContent="Testing…";button.classList.add("is-loading");
   fb.textContent="Contacting provider through your local proxy…";
   try{
-    const list=await discover(p);pendingModels=list;p.models=list;
+    const list=await discover(p);pendingModels=list;pendingFreeSource=providerHost(p);p.models=list;p.freeModelSource=pendingFreeSource;
     fb.className="feedback success";
     fb.textContent="Connected successfully. "+list.length+" model(s) found.";
     if(list.length&&!p.defaultModel)$("#providerModel").value=list[0];
