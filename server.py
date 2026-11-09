@@ -13,6 +13,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import socket
 import ssl
 import subprocess
@@ -433,8 +434,8 @@ def project_server_status(project_id):
         except Exception:
             pass
         RUNNING_PROJECTS.pop(project_id, None)
-        return {"running": False, "url": None, "pid": process.pid, "exit_code": process.returncode}
-    return {"running": True, "url": process_info["url"], "pid": process.pid, "exit_code": None}
+        return {"running": False, "url": None, "pid": process.pid, "exit_code": process.returncode, "runtime": process_info["runtime"]}
+    return {"running": True, "url": process_info["url"], "pid": process.pid, "exit_code": None, "runtime": process_info["runtime"]}
 
 
 def start_project_server(project_id):
@@ -473,12 +474,13 @@ def start_project_server(project_id):
         args = ["run", script]
         if "vite" in script_text:
             args += ["--", "--host", "127.0.0.1", "--port", str(port), "--strictPort"]
+            runtime = "Vite via npm " + script
         elif "next" in script_text:
             args += ["--", "--hostname", "127.0.0.1", "--port", str(port)]
+            runtime = "Next.js via npm " + script
         else:
-            env["HOST"] = "127.0.0.1"
+            raise ValueError("The project script is not recognized as Vite or Next.js. For safe local preview, use one of these supported dev servers or add a static index.html.")
         command = [npm_path] + args
-        runtime = "npm " + script
     else:
         entry = next((name for name in python_candidates if (base / name).is_file() and not (base / name).is_symlink()), None)
         if not entry:
@@ -488,10 +490,12 @@ def start_project_server(project_id):
         module = Path(entry).stem
         if "FastAPI(" in source or "FastAPI (" in source:
             command = [python, "-m", "uvicorn", module + ":app", "--host", "127.0.0.1", "--port", str(port)]
-            runtime = "Python ASGI / uvicorn"
+            runtime = "FastAPI / uvicorn"
+        elif "Flask(" in source or "Flask (" in source:
+            command = [python, "-m", "flask", "--app", module, "run", "--host", "127.0.0.1", "--port", str(port)]
+            runtime = "Flask"
         else:
-            command = [python, entry]
-            runtime = "Python " + entry
+            raise ValueError("The Python entry point is not recognized as FastAPI or Flask. Use a supported framework entry point or add a static index.html for preview.")
 
     log_dir = Path(tempfile.gettempdir()) / "vibe-calling-runtime"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -507,19 +511,36 @@ def start_project_server(project_id):
             launch, cwd=str(base), env=env, stdin=subprocess.DEVNULL,
             stdout=log_handle, stderr=subprocess.STDOUT, shell=False,
             creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0,
+            start_new_session=(os.name != "nt"),
         )
         RUNNING_PROJECTS[project_id] = {
             "process": process, "log": log_handle, "log_path": log_path,
             "url": "http://127.0.0.1:" + str(port), "runtime": runtime,
         }
-        time.sleep(1.0)
-        status = project_server_status(project_id)
-        if not status["running"]:
+        deadline = time.monotonic() + 15.0
+        ready = False
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                break
+            try:
+                with socket.create_connection((HOST, port), timeout=0.4):
+                    ready = True
+                    break
+            except OSError:
+                time.sleep(0.25)
+        if not ready:
+            exit_code = process.poll()
             try:
                 detail = log_path.read_text(encoding="utf-8", errors="replace")[-12000:]
             except OSError:
                 detail = ""
-            raise RuntimeError("Project process exited during startup (exit " + str(status["exit_code"]) + "). " + detail)
+            stop_project_server(project_id)
+            raise RuntimeError(
+                "Project server did not open its local port within 15 seconds"
+                + (" (exit " + str(exit_code) + ")" if exit_code is not None else "")
+                + ". " + detail
+            )
+        status = project_server_status(project_id)
         return {**status, "runtime": runtime, "log_path": str(log_path)}
     except Exception:
         try:
@@ -535,11 +556,25 @@ def stop_project_server(project_id):
         return {"running": False, "stopped": False}
     process = info["process"]
     if process.poll() is None:
-        process.terminate()
+        if os.name == "nt":
+            taskkill = shutil.which("taskkill") or "taskkill"
+            subprocess.run([taskkill, "/PID", str(process.pid), "/T", "/F"],
+                           capture_output=True, text=True, timeout=10, check=False)
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            process.kill()
+            if os.name == "nt":
+                process.kill()
+            else:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
             process.wait(timeout=5)
     try:
         info["log"].close()
