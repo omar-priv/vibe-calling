@@ -37,7 +37,8 @@ function markdown(s){
  let x=esc(s),fence=String.fromCharCode(96).repeat(3);
  x=x.replace(new RegExp(fence+"([\\w-]*)\\n([\\s\\S]*?)"+fence,"g"),(_,l,c)=>"<pre><code>"+c+"</code></pre>");
  x=x.replace(/^### (.*)$/gm,"<h3>$1</h3>").replace(/^## (.*)$/gm,"<h2>$1</h2>").replace(/^# (.*)$/gm,"<h1>$1</h1>").replace(/\\*\\*(.*?)\\*\\*/g,"<b>$1</b>");
- x=x.replace(/\\[([^\\]]+)\\]\\((\\/api\\/download\\/[^)\\s]+)\\)/g,'<a class="file-download" href="$2" download>$1</a>');
+ const downloadPattern=new RegExp(String.raw`\\[([^\\]]+)\\]\\((\\/api\\/download\\/[^)\\s]+)\\)`,"g");
+ x=x.replace(downloadPattern,'<a class="file-download" href="$2" download>$1</a>');
  return x.split(/\\n{2,}/).map(p=>p.startsWith("<pre>")||p.startsWith("<h")?p:"<p>"+p.replace(/\\n/g,"<br>")+"</p>").join("");
 }
 function renderChat(){
@@ -205,7 +206,7 @@ async function refreshWorkspacePanel(){
   filesEl.textContent="Start Vibe Calling with start.bat and refresh.";
  }
 }
-async async function runTool(name,a){
+aasync function runTool(name,a){
  if(name.startsWith("mcp_github_"))return callGithubMcpTool(name,a);
  if(name==="skill_list"){const data=await skillsRequest({action:"list"});return data.skills.map(sk=>sk.id+" · "+sk.name+" — "+sk.description).join("\\n")||"No skills are installed."}
  if(name==="skill_read")return readSkill(a.id);
