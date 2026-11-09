@@ -86,8 +86,8 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertIn('if action == "upload_attachment":', server_source)
         self.assertIn('if action == "read_attachment_base64":', server_source)
         self.assertIn('request_path.startswith("/api/download/")', server_source)
-        self.assertIn('route == "/api/skills"', server_source)
-        self.assertIn('route == "/api/mcp/github"', server_source)
+        self.assertIn('elif route == "/api/skills":', server_source)
+        self.assertIn('self.handle_github_mcp(payload)', server_source)
 
     def test_index_exposes_new_controls(self):
         root = Path(__file__).resolve().parents[1]
