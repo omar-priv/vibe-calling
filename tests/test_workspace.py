@@ -119,8 +119,8 @@ class AgentSkillTests(unittest.TestCase):
 
     def test_upload_and_read_custom_markdown_skill(self):
         content = (
-            "---\\nname: Research Helper\\ndescription: Verify information and cite reliable sources.\\n---\\n"
-            "# Research workflow\\nCheck primary sources first.\\n"
+            "---\nname: Research Helper\ndescription: Verify information and cite reliable sources.\n---\n"
+            "# Research workflow\nCheck primary sources first.\n"
         ).encode("utf-8")
         encoded = base64.b64encode(content).decode("ascii")
         result = server.install_skill_upload("research-helper.md", encoded)
@@ -131,7 +131,7 @@ class AgentSkillTests(unittest.TestCase):
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w") as archive:
             archive.writestr("my-skill/SKILL.md",
-                             "---\\nname: My Skill\\ndescription: A safe test skill.\\n---\\n")
+                             "---\nname: My Skill\ndescription: A safe test skill.\n---\n")
             archive.writestr("my-skill/../outside.txt", "should not extract")
         encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
         with self.assertRaises(ValueError):
