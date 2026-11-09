@@ -1,3 +1,4 @@
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -54,6 +55,30 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.run_project_command("demo", "python -c print(1)")
 
+
+
+class FrontendBundleTests(unittest.TestCase):
+    def test_embedded_script_matches_editable_source(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "app.js").read_text(encoding="utf-8").strip()
+        html = (root / "index.html").read_text(encoding="utf-8")
+        match = re.search(r"<script>\\s*([\\s\\S]*?)\\s*</script>", html)
+        self.assertIsNotNone(match, "index.html must contain its self-contained app script")
+        self.assertEqual(source, match.group(1).strip())
+
+    def test_new_workspace_tools_are_registered(self):
+        root = Path(__file__).resolve().parents[1]
+        app = (root / "app.js").read_text(encoding="utf-8")
+        for name in (
+            "workspace_create_project",
+            "workspace_list_files",
+            "workspace_read_file",
+            "workspace_write_file",
+            "workspace_delete_file",
+            "workspace_run_command",
+            "workspace_preview",
+        ):
+            self.assertIn(name, app)
 
 if __name__ == "__main__":
     unittest.main()
