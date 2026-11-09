@@ -94,14 +94,33 @@
       </section>
 
       <section class="view page-view" id="toolsView">
-        <div class="page-heading"><div><div class="eyebrow"><span></span> AGENT MODE</div><h1>Tools & abilities<span>.</span></h1><p>Small local tools the model can call when Agent mode is enabled.</p></div><span class="beta-pill">EXPERIMENTAL</span></div>
+        <div class="page-heading"><div><div class="eyebrow"><span></span> AGENT MODE</div><h1>Tools & abilities<span>.</span></h1><p>Build and inspect complete projects using guarded local tools and optional GitHub MCP.</p></div><span class="beta-pill">EXPERIMENTAL</span></div>
         <div class="tools-grid">
           <article class="tool-card"><div class="tool-card-icon">∑</div><div><h3>Calculator</h3><p>Evaluate basic arithmetic expressions locally.</p><span class="tool-status"><i></i> ENABLED</span></div></article>
           <article class="tool-card"><div class="tool-card-icon">◷</div><div><h3>Current date & time</h3><p>Get the browser's local date and time.</p><span class="tool-status"><i></i> ENABLED</span></div></article>
           <article class="tool-card"><div class="tool-card-icon">▤</div><div><h3>Workspace notes</h3><p>Save and retrieve notes in this browser.</p><span class="tool-status"><i></i> ENABLED</span></div></article>
           <article class="tool-card disabled-tool"><div class="tool-card-icon">⌕</div><div><h3>Web search</h3><p>Not connected. Add a search API or backend to enable secure web search.</p><span class="tool-status muted">NOT CONFIGURED</span></div></article>
         </div>
-        <div class="info-banner"><span>⚠</span><div><b>What Agent mode means here</b><p>The model may request the tools above, and this app runs those specific local actions. It does not have unrestricted access to your computer, files, terminal, or browser tabs. Tool calling must also be supported by the selected model/provider.</p></div></div>
+        <section class="workspace-panel" aria-labelledby="workspaceHeading">
+          <div class="workspace-panel-head">
+            <div><div class="eyebrow"><span></span> LOCAL PROJECTS</div><h2 id="workspaceHeading">Project workspace</h2><p>Agent-created websites and tools stay inside the projects folder.</p></div>
+          </div>
+          <div class="workspace-create-row">
+            <label class="sr-only" for="projectNameInput">New project name</label>
+            <input class="field" id="projectNameInput" type="text" maxlength="100" placeholder="Project name (e.g. my-first-site)" autocomplete="off" />
+            <button type="button" class="primary-button" id="createProjectBtn">＋ Create project</button>
+          </div>
+          <div class="workspace-select-row">
+            <label class="field-label" for="projectSelect">Active project</label>
+            <select class="field" id="projectSelect"><option value="">Select a project</option></select>
+            <button type="button" class="secondary-button" id="refreshWorkspaceBtn">Refresh</button>
+            <button type="button" class="secondary-button" id="previewProjectBtn">Preview</button>
+          </div>
+          <div class="workspace-status" id="workspaceStatus" role="status" aria-live="polite">Loading projects…</div>
+          <pre class="workspace-files" id="workspaceFiles">No project selected.</pre>
+        </section>
+        <div class="info-banner"><span>⚠</span><div><b>What Agent mode means here</b><p>Agent mode can create projects and edit files only inside the local projects folder. File deletion and allowlisted build/test commands ask for your approval. This is not an operating-system sandbox: only approve commands and projects you trust. Tool calling must also be supported by the selected model/provider.</p></div></div>
+        <div class="info-banner mcp-banner"><span>⌘</span><div><b>GitHub MCP</b><p>The repository includes a GitHub MCP configuration for MCP-compatible hosts. It starts in read-only mode. It is a separate integration and is not yet loaded directly by Vibe Calling's own chat agent. See <code>docs/agent-tools-and-mcp.md</code>.</p></div></div>
       </section>
 
       <section class="view page-view" id="settingsView">
@@ -145,7 +164,6 @@
   </dialog>
   <div class="toast" id="toast"></div>
   <script>
-/* App bundle embedded in index.html so the UI never depends on a separate .js request. */
 /* Vibe Calling UI — robust event delegation edition */
 (() => {
 "use strict";
@@ -198,9 +216,103 @@ async function testProvider(){
 function addMessage(role,content,extra={}){const c=current();if(!c)return;c.messages.push({role,content,...extra});if(role==="user"&&c.title==="New conversation")c.title=content.slice(0,42)+(content.length>42?"…":"");saveChats();renderChat()}
 function selected(){const v=$("#modelSelect").value,i=v.indexOf("::");return i<0?{}:{provider:byId(v.slice(0,i)),model:v.slice(i+2)}}
 function calculate(expr){if(!/^[\d\s.+\-*/()%]+$/.test(expr)||!expr.trim())throw Error("Invalid expression");const ts=expr.match(/\d+(?:\.\d+)?|[()+\-*/%]/g)||[];if(ts.join("")!==expr.replace(/\s/g,""))throw Error("Invalid expression");const out=[],ops=[],pr={"+":1,"-":1,"*":2,"/":2,"%":2};let prev="start";for(const t of ts){if(/^\d/.test(t)){if(prev==="number"||prev===")")throw Error("Invalid expression");out.push(Number(t));prev="number"}else if(t==="("){if(prev==="number"||prev===")")throw Error("Invalid expression");ops.push(t);prev="("}else if(t===")"){while(ops.length&&ops.at(-1)!=="(")out.push(ops.pop());if(ops.pop()!=="(")throw Error("Mismatched parentheses");prev=")"}else{if(prev!=="number"&&prev!==")"){if((t==="-"||t==="+")&&["start","(","operator"].includes(prev))out.push(0);else throw Error("Invalid expression")}while(ops.length&&pr[ops.at(-1)]>=pr[t])out.push(ops.pop());ops.push(t);prev="operator"}}while(ops.length){const op=ops.pop();if(op==="(")throw Error("Mismatched parentheses");out.push(op)}const st=[];for(const t of out){if(typeof t==="number")st.push(t);else{const b=st.pop(),a=st.pop();st.push(t==="+"?a+b:t==="-"?a-b:t==="*"?a*b:t==="/"?a/b:a%b)}}if(st.length!==1||!Number.isFinite(st[0]))throw Error("Invalid result");return String(st[0])}
-const tools=[{type:"function",function:{name:"calculator",description:"Calculate basic arithmetic.",parameters:{type:"object",properties:{expression:{type:"string"}},required:["expression"]}}},{type:"function",function:{name:"get_current_datetime",description:"Get local date and time.",parameters:{type:"object",properties:{},required:[]}}},{type:"function",function:{name:"save_note",description:"Save a note locally.",parameters:{type:"object",properties:{title:{type:"string"},content:{type:"string"}},required:["title","content"]}}},{type:"function",function:{name:"list_notes",description:"List locally saved notes.",parameters:{type:"object",properties:{},required:[]}}}];
-async function runTool(name,a){if(name==="calculator")return calculate(a.expression||"");if(name==="get_current_datetime")return new Date().toLocaleString();if(name==="save_note"){notes.unshift({id:uid(),title:String(a.title||"Note"),content:String(a.content||"")});write(KEYS.notes,notes);return"Note saved locally"}if(name==="list_notes")return notes.map(n=>"- "+n.title+": "+n.content).join("\n")||"No notes";throw Error("Unknown tool")}
-async function send(text){if(busy)return;const q=selected();if(!q.provider||!q.model){toast("Connect a provider and set a model ID first.");if(!providers.length)openProvider();else setView("providers");return}if(!chatId)newChat();addMessage("user",text);busy=true;$("#sendBtn").disabled=true;$("#messageInput").disabled=true;controller=new AbortController();const spinner=document.createElement("div");spinner.className="typing";spinner.innerHTML="<i></i><i></i><i></i>";$("#messages").appendChild(spinner);$("#welcome").style.display="none";try{const history=current().messages.map(m=>({role:m.role,content:m.content}));let answer="",used=[];for(let n=0;n<6;n++){const body={model:q.model,messages:history,temperature:.7,stream:false};if($("#agentToggle").checked){body.tools=tools;body.tool_choice="auto"}const res=await api(q.provider,"/chat/completions","POST",body,controller.signal),msg=res.choices?.[0]?.message;if(!msg)throw Error(res.error?.message||"Empty response from provider");if(msg.tool_calls?.length&&$("#agentToggle").checked){history.push(msg);for(const c of msg.tool_calls){let args={};try{args=JSON.parse(c.function.arguments||"{}")}catch{}let value;try{value=await runTool(c.function.name,args);used.push(c.function.name+" ✓")}catch(e){value="Tool error: "+e.message;used.push(c.function.name+" failed")}history.push({role:"tool",tool_call_id:c.id,name:c.function.name,content:String(value)})}continue}answer=msg.content||"";break}spinner.remove();addMessage("assistant",answer||"The model returned no final text.",{model:q.model,toolLog:used.length?"Tools used: "+used.join(" · "):""})}catch(e){spinner.remove();addMessage("assistant",e.name==="AbortError"?"Request stopped.":"**Request failed**\n\n"+e.message+"\n\nCheck Base URL, API key, model ID and provider compatibility.",{model:q.model})}finally{busy=false;controller=null;$("#sendBtn").disabled=false;$("#messageInput").disabled=false;$("#messageInput").focus()}}
+const activeProjectKey="vc_active_project_v1";
+let activeProject=localStorage.getItem(activeProjectKey)||"";
+const toolDef=(name,description,properties,required=[])=>({type:"function",function:{name,description,parameters:{type:"object",properties,required}}});
+const tools=[
+ toolDef("calculator","Calculate a basic arithmetic expression locally.",{expression:{type:"string"}},["expression"]),
+ toolDef("get_current_datetime","Get the user's local date and time.",{}),
+ toolDef("save_note","Save a note in this browser.",{title:{type:"string"},content:{type:"string"}},["title","content"]),
+ toolDef("list_notes","List saved browser notes.",{}),
+ toolDef("workspace_list_projects","List all project folders available to this Vibe Calling workspace.",{}),
+ toolDef("workspace_create_project","Create a new isolated project folder. Use this before creating project files.",{name:{type:"string"}},["name"]),
+ toolDef("workspace_list_files","List text files in one project. Large dependency/build folders and secrets are excluded.",{project:{type:"string"}},["project"]),
+ toolDef("workspace_read_file","Read a UTF-8 text file inside one project.",{project:{type:"string"},path:{type:"string"}},["project","path"]),
+ toolDef("workspace_write_file","Create or replace a UTF-8 text file inside one project. Parent folders are created automatically. Never write credentials or .env files.",{project:{type:"string"},path:{type:"string"},content:{type:"string"}},["project","path","content"]),
+ toolDef("workspace_delete_file","Delete one file inside the project. The user must approve the deletion in a confirmation dialog.",{project:{type:"string"},path:{type:"string"}},["project","path"]),
+ toolDef("workspace_run_command","Run one allowlisted build or test command in the project folder. Every command needs user approval. Supported commands: npm install, npm ci, npm run build/test/lint, npx playwright test, python -m compileall/pytest/unittest, git status/diff/log.",{project:{type:"string"},command:{type:"string"}},["project","command"]),
+ toolDef("workspace_preview","Get the local preview URL for a project's index.html file.",{project:{type:"string"}},["project"])
+];
+async function workspaceRequest(payload){
+ const response=await fetch("/api/workspace",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+ const raw=await response.text();
+ let data={};try{data=raw?JSON.parse(raw):{}}catch{}
+ if(!response.ok)throw new Error(data.error||("Workspace request failed (HTTP "+response.status+")."));
+ return data;
+}
+function setActiveProject(project){
+ activeProject=project||"";
+ if(activeProject)localStorage.setItem(activeProjectKey,activeProject);else localStorage.removeItem(activeProjectKey);
+}
+async function refreshWorkspacePanel(){
+ const select=$("#projectSelect"),filesEl=$("#workspaceFiles"),status=$("#workspaceStatus");
+ if(!select||!filesEl||!status)return;
+ try{
+  const data=await workspaceRequest({action:"list_projects"});
+  const projects=data.projects||[];
+  if(activeProject&&!projects.includes(activeProject))setActiveProject("");
+  select.innerHTML='<option value="">Select a project</option>'+projects.map(p=>'<option value="'+esc(p)+'">'+esc(p)+'</option>').join("");
+  select.value=activeProject;
+  if(!activeProject){
+   filesEl.textContent="No project selected. Create one here or ask Agent mode to create it.";
+   status.textContent=projects.length+" project(s) available.";
+   return;
+  }
+  const listing=await workspaceRequest({action:"list_files",project:activeProject});
+  const items=listing.files||[];
+  filesEl.textContent=items.length?items.map(x=>x.path+" · "+x.bytes+" bytes").join("\n"):"Project is empty. Ask the agent to create the first files.";
+  status.textContent=activeProject+" · "+items.length+" file(s)";
+ }catch(error){
+  status.textContent="Workspace unavailable: "+error.message;
+  filesEl.textContent="Start Vibe Calling with start.bat and refresh.";
+ }
+}
+async function runTool(name,a){
+ if(name==="calculator")return calculate(a.expression||"");
+ if(name==="get_current_datetime")return new Date().toLocaleString();
+ if(name==="save_note"){notes.unshift({id:uid(),title:String(a.title||"Note"),content:String(a.content||"")});write(KEYS.notes,notes);return"Note saved locally"}
+ if(name==="list_notes")return notes.map(n=>"- "+n.title+": "+n.content).join("\n")||"No notes";
+ if(name==="workspace_list_projects"){
+  const data=await workspaceRequest({action:"list_projects"});
+  return data.projects.length?("Projects: "+data.projects.join(", ")):"No projects exist yet. Use workspace_create_project first.";
+ }
+ if(name==="workspace_create_project"){
+  const data=await workspaceRequest({action:"create_project",name:a.name});
+  setActiveProject(data.project);await refreshWorkspacePanel();
+  return "Created project "+data.project+" at "+data.path+". It is now the active project.";
+ }
+ if(name==="workspace_list_files"){
+  const data=await workspaceRequest({action:"list_files",project:a.project});
+  return data.files.length?data.files.map(x=>x.path+" ("+x.bytes+" bytes)").join("\n"):"Project is empty.";
+ }
+ if(name==="workspace_read_file"){
+  const data=await workspaceRequest({action:"read_file",project:a.project,path:a.path});
+  return "FILE: "+data.path+"\n"+data.content;
+ }
+ if(name==="workspace_write_file"){
+  const data=await workspaceRequest({action:"write_file",project:a.project,path:a.path,content:a.content});
+  if(a.project===activeProject)await refreshWorkspacePanel();
+  return "Saved "+data.path+" ("+data.bytes+" bytes).";
+ }
+ if(name==="workspace_delete_file"){
+  if(!confirm("The agent wants to permanently delete this file:\n\n"+a.project+"/"+a.path+"\n\nAllow this deletion?"))return "User declined the file deletion.";
+  const data=await workspaceRequest({action:"delete_file",project:a.project,path:a.path,confirmed:true});
+  if(a.project===activeProject)await refreshWorkspacePanel();
+  return "Deleted "+data.deleted+".";
+ }
+ if(name==="workspace_run_command"){
+  const warning="The agent wants to run this command in project '"+a.project+"':\n\n"+a.command+"\n\nCommands and project scripts run on your computer. Only approve if you trust this project and command.\n\nRun it?";
+  if(!confirm(warning))return "User declined command execution. Do not retry unless the user asks.";
+  const data=await workspaceRequest({action:"run_command",project:a.project,command:a.command});
+  return "Exit code: "+data.exit_code+(data.timed_out?" (timed out)":"")+"\n\n"+(data.output||"(No command output)");
+ }
+ if(name==="workspace_preview"){
+  const data=await workspaceRequest({action:"preview",project:a.project});
+  return "Preview is ready: "+data.url+"\nOpen that URL in your browser. The project must contain index.html.";
+ }
+ throw Error("Unknown tool: "+name);
+}
+async function send(text){if(busy)return;const q=selected();if(!q.provider||!q.model){toast("Connect a provider and set a model ID first.");if(!providers.length)openProvider();else setView("providers");return}if(!chatId)newChat();addMessage("user",text);busy=true;$("#sendBtn").disabled=true;$("#messageInput").disabled=true;controller=new AbortController();const spinner=document.createElement("div");spinner.className="typing";spinner.innerHTML="<i></i><i></i><i></i>";$("#messages").appendChild(spinner);$("#welcome").style.display="none";try{const history=current().messages.map(m=>({role:m.role,content:m.content}));let answer="",used=[];for(let n=0;n<12;n++){const body={model:q.model,messages:history,temperature:.7,stream:false};if($("#agentToggle").checked){body.tools=tools;body.tool_choice="auto"}const res=await api(q.provider,"/chat/completions","POST",body,controller.signal),msg=res.choices?.[0]?.message;if(!msg)throw Error(res.error?.message||"Empty response from provider");if(msg.tool_calls?.length&&$("#agentToggle").checked){history.push(msg);for(const c of msg.tool_calls){let args={};try{args=JSON.parse(c.function.arguments||"{}")}catch{}let value;try{value=await runTool(c.function.name,args);used.push(c.function.name+" ✓")}catch(e){value="Tool error: "+e.message;used.push(c.function.name+" failed")}history.push({role:"tool",tool_call_id:c.id,name:c.function.name,content:String(value)})}continue}answer=msg.content||"";break}spinner.remove();addMessage("assistant",answer||"The model returned no final text.",{model:q.model,toolLog:used.length?"Tools used: "+used.join(" · "):""})}catch(e){spinner.remove();addMessage("assistant",e.name==="AbortError"?"Request stopped.":"**Request failed**\n\n"+e.message+"\n\nCheck Base URL, API key, model ID and provider compatibility.",{model:q.model})}finally{busy=false;controller=null;$("#sendBtn").disabled=false;$("#messageInput").disabled=false;$("#messageInput").focus()}}
 function retry(index){const c=current();if(!c||busy)return;const u=c.messages.slice(0,index).reverse().find(m=>m.role==="user");if(!u)return;c.messages=c.messages.slice(0,index);if(c.messages.at(-1)?.role==="user")c.messages.pop();saveChats();renderChat();send(u.content)}
 document.addEventListener("click",e=>{
   const button=e.target.closest("button");
@@ -218,6 +330,9 @@ if(b.id==="mobileMenu"){$("#sidebar").classList.toggle("open");return}
 if(b.id==="agentQuick"){$("#agentToggle").checked=!$("#agentToggle").checked;$("#toolState").textContent=$("#agentToggle").checked?"on":"off";toast("Agent mode "+($("#agentToggle").checked?"enabled":"disabled"));return}
 if(b.id==="toggleKey"){$("#providerKey").type=$("#providerKey").type==="password"?"text":"password";return}
 if(b.id==="testProvider"){testProvider();return}
+if(b.id==="createProjectBtn"){(async()=>{const input=$("#projectNameInput"),name=input.value.trim();if(!name){toast("Enter a project name first.");return}try{const data=await workspaceRequest({action:"create_project",name});setActiveProject(data.project);input.value="";await refreshWorkspacePanel();toast("Project created: "+data.project)}catch(error){toast(error.message)}})();return}
+if(b.id==="refreshWorkspaceBtn"){refreshWorkspacePanel();return}
+if(b.id==="previewProjectBtn"){(async()=>{const tab=window.open("about:blank","_blank");try{if(!activeProject)throw Error("Select a project first.");const data=await workspaceRequest({action:"preview",project:activeProject});if(tab)tab.location=data.url;else toast(data.url)}catch(error){if(tab)tab.close();toast(error.message)}})();return}
 if(b.id==="clearHistory"){if(confirm("Clear all conversations?")){chats=[];chatId=null;saveChats();renderChat()}return}
 if(b.id==="clearAll"){$("#confirmDialog").showModal();return}
 if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));providers=[];chats=[];notes=[];chatId=null;$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
@@ -259,7 +374,8 @@ $("#chatForm").addEventListener("submit",e=>{e.preventDefault();const input=$("#
 $("#messageInput").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("#chatForm").requestSubmit()}});
 $("#messageInput").addEventListener("input",e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,180)+"px"});
 $("#agentToggle").addEventListener("change",e=>{$("#toolState").textContent=e.target.checked?"on":"off"});
-function init(){try{renderProviders();renderModels();renderHistory();renderChat();console.info("Vibe Calling initialized")}catch(e){fatal(e.stack||e.message||String(e))}}
+$("#projectSelect").addEventListener("change",e=>{setActiveProject(e.target.value);refreshWorkspacePanel()});
+function init(){try{renderProviders();renderModels();renderHistory();renderChat();refreshWorkspacePanel();console.info("Vibe Calling initialized")}catch(e){fatal(e.stack||e.message||String(e))}}
 init();
 window.__vibeAppReady = true;
 document.documentElement.dataset.vibeApp = 'ready';
