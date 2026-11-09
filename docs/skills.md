@@ -1,6 +1,6 @@
 # Vibe Calling Agent Skills
 
-The following skills are bundled in the repository and are available immediately through Agent mode:
+The following 19 skills are bundled in the repository and available immediately through Agent mode:
 
 | Skill | Purpose |
 |---|---|
@@ -14,6 +14,15 @@ The following skills are bundled in the repository and are available immediately
 | `code-review` | Review diffs for correctness, regressions, maintainability, and coverage |
 | `security-review` | Threat-model credentials, uploads, MCP tools, network calls, filesystem, and computer use |
 | `github-management` | Inspect repositories, create branches, review changes, and manage PR/CI workflows |
+| `visual-reference-research` | Inspect real reference websites and turn observations into a grounded design direction |
+| `ux-review` | Audit user journeys, information architecture, interaction friction, and UI states |
+| `accessibility-review` | Review semantic HTML, keyboard access, focus, labels, contrast, and reduced motion |
+| `performance-engineering` | Measure and improve startup, rendering, network, and server performance |
+| `api-integration` | Integrate APIs with official docs, authentication, limits, safe networking, and error handling |
+| `mcp-server-integration` | Connect remote Streamable HTTP MCP servers with session handling and tool approval policies |
+| `browser-visual-testing` | Verify real UI journeys and visual regressions in an actual browser |
+| `release-engineering` | Prepare safe GitHub releases using isolated branches, CI, diffs, and rollback plans |
+| `web-research` | Research current technical information using primary sources and cross-checking |
 
 ## How the agent uses them
 
