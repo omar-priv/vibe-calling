@@ -1177,13 +1177,14 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             total = 0
             while True:
-                chunk = response.read(4096)
+                # read1 returns currently available bytes instead of waiting for a full 4 KB buffer.
+                chunk = response.read1(4096) if hasattr(response, "read1") else response.read(4096)
                 if not chunk:
                     break
                 total += len(chunk)
                 if total > MAX_RESPONSE_BYTES:
                     try:
-                        self.wfile.write(b"data: {\\"error\\":{\\"message\\":\\"Provider stream exceeded the 32 MB local limit.\\"}}\\n\\n")
+                        self.wfile.write(b'data: {"error":{"message":"Provider stream exceeded the 32 MB local limit."}}\n\n')
                         self.wfile.flush()
                     except (BrokenPipeError, ConnectionResetError):
                         pass
