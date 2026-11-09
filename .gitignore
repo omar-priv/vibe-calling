@@ -9,3 +9,6 @@ __pycache__/
 .venv/
 venv/
 node_modules/
+
+# User-imported agent skills stay local unless explicitly shared.
+user_skills/

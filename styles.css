@@ -171,3 +171,334 @@ body {
  .workspace-create-row .primary-button,.workspace-select-row .secondary-button{width:100%}
  .workspace-select-row select{width:100%}
 }
+
+
+/* Vibe Calling v0.2 — fixed chat shell, independent transcript scrolling, and refined workspace UI. */
+:root {
+  --bg: #090e15;
+  --panel: #101722;
+  --panel2: #151f2d;
+  --line: #263447;
+  --muted: #93a2b7;
+  --text: #e8eef7;
+  --purple: #a99aff;
+  --cyan: #65d9c5;
+  --danger: #ff818d;
+  --surface-raised: #182333;
+}
+html, body {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+body {
+  background:
+    radial-gradient(ellipse at 72% -20%, #27304b 0, transparent 43%),
+    radial-gradient(ellipse at 0% 100%, #102923 0, transparent 36%),
+    var(--bg);
+}
+.app-shell {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+.sidebar {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: rgba(12, 19, 29, .97);
+  border-right-color: #253345;
+}
+.history-list {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.sidebar-bottom { flex: 0 0 auto; }
+.main {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.topbar { flex: 0 0 65px; background: rgba(10, 16, 25, .58); }
+.view {
+  min-height: 0;
+  overflow: hidden;
+}
+.view.active { min-height: 0; }
+#chatView {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 0;
+  overflow: hidden;
+}
+.chat-toolbar { flex: 0 0 62px; }
+.chat-content {
+  flex: 1 1 0;
+  height: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scroll-behavior: smooth;
+}
+.messages {
+  width: 100%;
+  max-width: 920px;
+  min-height: min-content;
+  padding: 28px clamp(14px, 4vw, 34px) 44px;
+}
+.welcome { margin-top: clamp(22px, 6vh, 58px); }
+.composer-area {
+  flex: 0 0 auto;
+  width: min(100%, 980px);
+  max-width: none;
+  padding: 12px clamp(12px, 3vw, 28px) max(12px, env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, transparent, rgba(9, 14, 21, .78) 24%);
+}
+.composer {
+  border-color: #34455c;
+  background: rgba(16, 24, 36, .96);
+  backdrop-filter: blur(14px);
+  border-radius: 16px;
+}
+.composer:focus-within {
+  border-color: #8279bd;
+  box-shadow: 0 0 0 3px #a99aff18, 0 16px 46px #0004;
+}
+.composer textarea { font-size: 13px; }
+.composer-hint, .send-area>span { font-size: 9px; }
+.send-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #b3a7ff, #69ddc8);
+}
+.disclaimer { margin-top: 7px; font-size: 9px; }
+.messages .message { gap: 13px; }
+.message-avatar { flex-basis: 32px; width: 32px; height: 32px; border-radius: 11px; }
+.message-body { max-width: min(88%, 760px); }
+.message-content { font-size: 13px; line-height: 1.85; }
+.message.user .message-body {
+  border-radius: 15px 5px 15px 15px;
+  background: #192638;
+  border-color: #344a65;
+  padding: 12px 15px;
+}
+.message.assistant .message-body { padding-top: 2px; }
+.message-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+  border-color: #2d3e54;
+  background: #080d14;
+}
+.message-content a, .file-download { color: #a99aff; text-decoration: underline; text-underline-offset: 3px; }
+.message-actions button {
+  font-size: 10px;
+  padding: 5px 9px;
+  border-radius: 7px;
+}
+.page-view {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 36px clamp(18px, 4vw, 58px);
+}
+.page-heading { margin-bottom: 25px; }
+.page-heading h1 { font-size: clamp(27px, 4vw, 36px); }
+.icon-button, .mobile-menu, .model-select-wrap select, .field {
+  border-color: #34465d;
+  background-color: #121c2a;
+}
+.nav-item { min-height: 40px; }
+.nav-item.active {
+  border: 1px solid #303d57;
+  background: linear-gradient(110deg, #202a43, #172a32);
+  color: #f3f3ff;
+}
+.nav-item>span:first-child { color: var(--purple); }
+.new-chat {
+  border-color: #554d85;
+  background: linear-gradient(110deg, #312c4c, #1b2b37);
+  border-radius: 11px;
+}
+.suggestion, .provider-card, .tool-card, .settings-panel, .workspace-panel {
+  border-color: #2b3b50;
+  background: rgba(16, 24, 36, .88);
+  border-radius: 13px;
+}
+.suggestion { min-height: 104px; }
+.suggestion:hover, .provider-card:hover { border-color: #6b6597; background: #172334; }
+.primary-button {
+  border-radius: 9px;
+  background: linear-gradient(120deg, #b5a9ff, #69d9c7);
+  color: #101522;
+}
+.secondary-button, .tool-button {
+  border-color: #35475e;
+  background: #1a2637;
+  border-radius: 8px;
+}
+.field { border-radius: 8px; font-size: 12px; }
+.modal {
+  border-color: #384b63;
+  background: #111b29;
+  border-radius: 16px;
+}
+.info-banner { border-color: #364862; background: #172538; border-radius: 12px; }
+.workspace-panel {
+  padding: 22px;
+  margin-top: 18px;
+  background: linear-gradient(145deg, rgba(20, 31, 47, .96), rgba(13, 21, 32, .96));
+}
+.workspace-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.workspace-panel-head h2 { color: #eef2fb; }
+.workspace-panel-head p { max-width: 680px; line-height: 1.7; }
+.skills-panel-head { align-items: center; }
+.skills-upload-action { flex: 0 0 auto; }
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.skill-card {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #2b3d54;
+  border-radius: 11px;
+  background: rgba(9, 15, 24, .55);
+}
+.skill-card-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+.skill-card-head b { font-size: 12px; }
+.skill-card-head span, .mcp-protocol-pill {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid #46517a;
+  color: #c5bbff;
+  background: #24233d;
+  font: 8px "DM Mono", monospace;
+  letter-spacing: .7px;
+}
+.skill-card p {
+  min-height: 46px;
+  margin: 9px 0 12px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.mcp-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+}
+.mcp-readonly {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #c7d4e5;
+  font-size: 11px;
+}
+.mcp-readonly input { accent-color: #a99aff; }
+.mcp-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.mcp-security-note {
+  margin: 12px 0 0;
+  color: #8f9fb4;
+  font-size: 10px;
+  line-height: 1.75;
+}
+.future-browser-panel {
+  border-style: dashed;
+  background: rgba(13, 21, 32, .68);
+}
+.attachment-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+}
+.pending-attachment, .message-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid #3a4c66;
+  border-radius: 8px;
+  background: #172438;
+  color: #cbd7e8;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.pending-attachment button {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 5px;
+  background: #26374d;
+  color: #f2c5ce;
+  line-height: 1;
+}
+.message-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.message-attachment { font-size: 9px; }
+.file-download {
+  display: inline-block;
+  margin: 5px 0;
+  padding: 6px 9px;
+  border: 1px solid #554d85;
+  border-radius: 7px;
+  background: #221f3c;
+  color: #c9c0ff !important;
+  text-decoration: none !important;
+}
+.workspace-files {
+  max-height: 260px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+#githubPatInput { width: 100%; }
+#fileInput, #skillFileInput { display: none; }
+.toast { z-index: 10000; }
+@media (max-width: 760px) {
+  .app-shell { height: 100dvh; }
+  .sidebar {
+    position: fixed;
+    z-index: 100;
+    height: 100dvh;
+    max-height: 100dvh;
+  }
+  .main { width: 100%; }
+  .topbar { flex-basis: 56px; }
+  #chatView { height: 0; }
+  .chat-toolbar { flex-basis: 55px; }
+  .chat-content { min-height: 0; }
+  .composer-area { padding: 8px 10px max(10px, env(safe-area-inset-bottom)); }
+  .composer-tools { gap: 6px; }
+  .tool-button { padding: 6px 8px; }
+  .messages { padding: 18px 12px 32px; }
+  .workspace-panel { padding: 16px; }
+  .workspace-panel-head { flex-direction: column; align-items: stretch; }
+  .skills-upload-action .primary-button { width: 100%; }
+  .mcp-controls { align-items: stretch; flex-direction: column; }
+  .mcp-buttons { width: 100%; }
+  .mcp-buttons button { flex: 1; }
+}

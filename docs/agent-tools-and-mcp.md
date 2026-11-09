@@ -1,78 +1,115 @@
-# Agent workspace and MCP
+# Agent workspace, skills, attachments, and GitHub MCP
 
-## What changed in Vibe Calling
+## Agent Skills
 
-Agent mode now has local project tools. The agent can:
+Built-in skills are stored in `skills/<skill-name>/SKILL.md`. They are immediately available without downloads or setup. The current set is:
 
-- Create and list project folders.
-- List project files and read UTF-8 text files.
-- Create or replace project files and parent folders.
-- Return a local preview URL when the project contains index.html.
-- Delete individual files only after a confirmation dialog.
-- Run a limited set of build/test commands only after a confirmation dialog.
+- project-planning
+- frontend-design
+- frontend-development
+- backend-design
+- backend-development
+- browser-testing
+- debugging
+- code-review
+- security-review
+- github-management
 
-All agent-managed projects live under projects/<project-id>/. File tools reject paths that try to leave the project, symbolic links, secret files such as .env, and private-key formats. Individual workspace files are limited to 2 MB. Dependency/build folders are omitted from file listings.
+Agent mode receives the skill catalog and can call `skill_list` and `skill_read` to load the relevant instruction files before design or implementation. Skills are task instructions and reference material, not model fine-tuning.
 
-### Important execution boundary
+### Import a custom skill
 
-This is a local-first personal tool, not a virtual machine or operating-system sandbox. Approved commands and project scripts execute on the user's computer. The current allowlist is deliberately small:
+Open **Agent tools → Agent skills → Upload skill**. Accepted formats:
 
-- npm install or npm ci
-- npm run build, npm run test, or npm run lint
-- npx playwright test
-- python -m compileall, python -m pytest, or python -m unittest
-- Read-only git status, git diff, and git log --oneline -5/-10
+- One UTF-8 `.md` file with YAML frontmatter containing `name` and `description`.
+- A `.zip` containing exactly one `SKILL.md` file, optionally with Markdown/text reference files.
 
-Long-running development servers are not launched as background processes yet. The current preview button serves a static project's index.html through Vibe Calling's local server. Dynamic frameworks that need npm run dev require a managed preview runner in a later phase. If Node/npm is not installed, the project can still generate static HTML/CSS/JS, but npm-based build commands will report that the executable is missing.
+Scripts and executable files are deliberately not accepted in skill archives. The upload is size-limited, rejects traversal and symbolic links, and is installed under `user_skills/`. This folder is ignored by Git so imported personal skills are not committed accidentally.
 
-## MCP explained
+Example:
 
-MCP means **Model Context Protocol**. Think of it as a standard connector between an AI application (the host/client) and external tool providers (MCP servers).
+```markdown
+---
+name: research-helper
+description: Research a topic using primary sources and verify claims.
+---
 
-Instead of hard-coding a separate integration for every service, the AI application can connect to an MCP server and discover the capabilities it exposes:
+# Research helper
 
-- **Tools:** actions the agent can invoke, such as reading a repository file or creating an issue.
-- **Resources:** information the server exposes for the model/application to read.
-- **Prompts:** reusable task templates or workflows.
+1. Search official sources first.
+2. Compare dates and cross-check claims.
+3. State uncertainty and cite evidence.
+```
 
-The normal flow is:
+## Chat attachments and generated files
 
-1. The host connects to an MCP server.
-2. It discovers available tools and their input schemas.
-3. The model chooses a tool and produces structured arguments.
-4. The host sends the tool call to the MCP server.
-5. The server returns a result, which the model uses to continue the task.
+The chat composer accepts up to 3 files per message, at most 2 MB per file and 4 MB total. Supported file types are common text/code formats and PNG/JPG/WEBP/GIF images. Text files are inserted into the message context; images are passed as image inputs, so the selected model must support vision. PDF, DOCX, audio, video, and archive attachments are not yet supported.
 
-MCP is not itself an AI model and does not magically make an agent autonomous. The host still decides which servers/tools are enabled, how secrets are stored, and which actions need user approval.
+Uploaded files are stored in the active local project under `uploads/`. The agent can read supported text files and images. The agent can use `workspace_download_file` to return a file download link to the user. The download route is confined to the selected project workspace and enforces a size limit.
 
-## GitHub MCP configuration
+## Local project workspace
 
-This repository includes .vscode/mcp.json for the official hosted GitHub MCP server:
+Agent mode can:
 
-- Server URL: https://api.githubcopilot.com/mcp/
-- Transport: Streamable HTTP.
-- Enabled toolsets: repositories, issues, and pull requests.
-- Default safety: read-only mode.
-- Authentication: asks the compatible host for a GitHub Personal Access Token; no token is stored in this repository.
+- Create and list projects.
+- List, read, and write UTF-8 project files.
+- Preview a static `index.html`.
+- Delete an individual file only after a confirmation dialog.
+- Run a small command allowlist only after user approval.
 
-### Connect it in an MCP-compatible host
+Projects live under `projects/<project-id>/`. Filesystem access blocks parent traversal, absolute paths, symbolic links, secrets such as `.env`, private keys, and dependency/build folders. Individual workspace text files are limited to 2 MB.
 
-1. Open this repository as a workspace in a host that supports remote MCP servers and the VS Code .vscode/mcp.json format.
-2. When prompted, provide a fine-grained GitHub PAT scoped only to the repository/repositories you want the agent to access.
-3. Start/enable the github MCP server in the host's MCP tools panel.
-4. Confirm that the GitHub tools load. The committed config includes X-MCP-Readonly: true so it can inspect repositories, issues, and pull requests but cannot modify them.
-5. Only when you deliberately need write access, edit the config to remove the read-only header and grant the PAT the narrow write permissions needed for the task. Do not use a broad classic token unless necessary.
+### Execution boundary
 
-**Never paste a GitHub token into a source file, issue, chat transcript, or commit.** If a token is ever exposed, revoke it and create a replacement.
+The Python server binds only to `127.0.0.1`. Approved project scripts and commands execute on the user's computer. The command allowlist is not an OS-level sandbox. Dynamic preview servers, unrestricted terminals, and actual browser automation are not available yet.
 
-### Is GitHub MCP already connected inside Vibe Calling?
+## What is MCP?
 
-Not yet. The committed .vscode/mcp.json is for MCP-compatible host applications that read this config. Vibe Calling's built-in agent currently uses its own native local workspace tools; it does not yet load arbitrary MCP servers dynamically. A future MCP client layer can connect remote MCP servers directly from Vibe Calling without changing the workspace tools.
+MCP stands for **Model Context Protocol**. It is a standard way for an AI host to connect to external tool providers. An MCP server can expose tools, resources, and prompt templates. The host discovers the tools and their input schemas, then lets the model choose a tool call. MCP is a connector protocol, not a model or an autonomous agent by itself.
 
-## Useful official references
+## GitHub MCP inside Vibe Calling
+
+Vibe Calling includes an in-app client for the official hosted GitHub MCP endpoint:
+
+- Endpoint: `https://api.githubcopilot.com/mcp/`
+- Transport: Streamable HTTP
+- Toolsets requested: `repos,issues,pull_requests`
+- Read-only mode: enabled by default
+- Authentication: GitHub fine-grained Personal Access Token supplied by the user
+
+### Connect
+
+1. Open **Agent tools → GitHub MCP**.
+2. Create a fine-grained GitHub token scoped only to the repositories you want the agent to access.
+3. Paste it into the token field.
+4. Leave **Read-only mode** checked and choose **Connect GitHub**.
+5. Once the MCP tool list is loaded, enable Agent mode in Chat and ask it to inspect one of your repositories.
+
+The token is stored in browser local storage so the connection can persist after reload. It is not encrypted by this app. Avoid shared browser profiles; do not send the token in chat or commit it to source control.
+
+### Write access
+
+Read-only mode sends the server's read-only header and blocks non-read-only tools in the Vibe Calling client. To allow GitHub write operations:
+
+1. Make sure the fine-grained token has only the specific write permissions you need.
+2. Turn off read-only mode and save settings.
+3. Reconnect GitHub so the remote service receives the updated mode.
+4. Confirm each write-capable GitHub tool call individually.
+
+A GitHub MCP server can expose many capabilities. Vibe Calling currently limits tool schemas passed to the model and does not expose every GitHub toolset.
+
+### Existing VS Code-compatible configuration
+
+The repository also keeps `.vscode/mcp.json` as an optional, read-only configuration for external MCP-compatible hosts. This is separate from the in-app MCP client.
+
+**Never paste a GitHub token into a source file, issue, chat transcript, or commit.** If a token is exposed, revoke it and create a replacement.
+
+## Remote browser / computer use
+
+The UI contains a clearly marked planned Beta panel for a server-hosted browser. It is not connected in this release. A real implementation needs disposable isolated browser sessions, strict network and file boundaries, resource limits, screenshots, action APIs, session expiry, and cleanup. It must not control the user's personal computer or share browser state across sessions.
+
+## References
 
 - [MCP architecture](https://modelcontextprotocol.io/docs/learn/architecture)
-- [MCP specification](https://modelcontextprotocol.io/specification/2026-07-28)
 - [GitHub MCP remote server](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md)
-- [GitHub MCP configuration guide](https://github.com/github/github-mcp-server/blob/main/docs/server-configuration.md)
-- [GitHub MCP setup for Codex](https://github.com/github/github-mcp-server/blob/main/docs/installation-guides/install-codex.md)
+- [GitHub MCP server configuration](https://github.com/github/github-mcp-server/blob/main/docs/server-configuration.md)

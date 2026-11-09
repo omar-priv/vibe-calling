@@ -1,55 +1,97 @@
-# Vibe Calling — Local Proxy Edition
+# Vibe Calling
 
-A lightweight local AI chat and project-building workspace for OpenAI-compatible providers, including NVIDIA NIM, Gemini, OpenAI, OpenRouter, Groq, and custom HTTPS endpoints.
+A lightweight, local-first AI chat and coding-agent workspace for OpenAI-compatible providers. It uses a small Python server and a self-contained HTML/CSS/JavaScript interface.
 
 ## Run on Windows
 
-1. Download the repository using **Code → Download ZIP** and extract it to a new folder.
+1. Download this branch as a ZIP and extract it, or clone the repository.
 2. Double-click `start.bat`.
-3. Keep the black server window open. It prints the exact local URL and opens it in your browser. If port 8765 is occupied by an older server, this copy automatically uses the next available port.
-4. To confirm the correct copy is running, append `/__health` to the exact URL printed in that black window. The page should return JSON with `"status": "ok"` and the project files.
-5. Open **Providers → Add provider**, enter your Base URL and API key, then use **Test connection** and **Save provider**.
+3. Keep the server window open. Vibe Calling opens at the local URL printed by the launcher (normally `http://127.0.0.1:8765`).
+4. Add a provider, enter the HTTPS Base URL and API key, test the connection, and save it.
+5. Choose one of the models identified as free, then enable Agent mode when you want project tools.
 
-For NVIDIA NIM, use `https://integrate.api.nvidia.com/v1`.
+No Node.js, npm, Docker, frontend build, or database is required to run the application itself. Node is only needed for some project build/test commands that an agent may run inside a project.
 
 ## Features
 
-- Agent workspace tools: create projects, list/read/write files, preview static websites, and run an allowlisted set of build/test commands.
-- Agent file operations stay inside projects/<project-id>/; secrets and symbolic links are blocked. Deleting files and executing commands require user confirmation.
-- GitHub MCP configuration template for MCP-compatible hosts is in .vscode/mcp.json (read-only by default). See docs/agent-tools-and-mcp.md.
-
-- Multiple OpenAI-compatible providers and manually selected model IDs.
-- Provider model discovery via the local proxy.
+- Multiple OpenAI-compatible providers; provider keys and settings are saved automatically in this browser.
+- Free-model-only discovery. Gemini uses a curated allowlist of free Flash models. OpenRouter models must be marked `:free` or provide zero pricing metadata. Other providers only show models where the API exposes explicit zero pricing; providers that do not expose pricing may show no models.
 - Multi-conversation chat history.
-- Optional model tool-calling for the built-in local tools (calculator, date/time, and notes).
-- Animated click acknowledgement plus hover, keyboard-focus, loading, success, and error states.
-- Reduced-motion support and responsive layout.
-- No external JavaScript framework or database required.
+- Agent mode with project creation, file read/write, static preview, and a limited, confirmation-gated command allowlist.
+- Ten built-in Agent Skills (planning, frontend design/development, backend design/development, browser testing, debugging, code review, security review, and GitHub management).
+- Import your own skills as a `.md` file or a `.zip` package containing one `SKILL.md`.
+- Attach up to three files to a chat message (2 MB each; 4 MB total). Supported formats include common text/code files and PNG/JPG/WEBP/GIF images.
+- Agent-generated project files can be returned as direct download links in chat.
+- In-app GitHub MCP connection through the official hosted GitHub MCP server, with read-only mode enabled by default and confirmation before write actions.
+- The chat transcript scrolls independently while the message composer remains fixed in the application layout.
+- A Remote Browser / Computer Use panel is marked as planned Beta only. No remote browser service is connected in this release.
 
-## Files
+## Free model filter
 
-- `index.html` — app interface, provider dialog, and embedded app bundle (the page does not need to fetch a separate JavaScript file).
-- `styles.css` — visual system, responsive layout, and interaction states.
-- `app.js` — editable source copy of the chat, provider, and local tool logic.
-- `server.py` — localhost web server and HTTPS API proxy.
-- `start.bat` — Windows launcher.
-- `docs/skills-reviewed.md` — UI/UX skill references reviewed and applied.
-- `docs/qa-smoke-test.md` — interaction and save-flow smoke test results.
-- `docs/agent-tools-and-mcp.md` — agent workspace tools, MCP explanation, and GitHub MCP setup.
+The UI intentionally hides models unless their free status can be identified. Gemini models currently recognized by the built-in allowlist include:
 
-## Important security note
+- `gemini-3.8-flash`
+- `gemini-3.6-flash`
+- `gemini-3.5-flash-lite`
+- `gemini-3.1-flash-lite`
+- `gemini-3-flash-preview`
+- `gemini-2.5-flash`
+- `gemini-2.5-flash-lite`
 
-This edition is designed for personal use on the same computer. The Python server binds only to `127.0.0.1`; do not expose it to the public internet. API keys remain in this browser's local storage and are not encrypted by the app. Do not use it in a shared browser profile.
+Gemini 3.7 Flash is not listed separately because Google documents it as deprecated and directs requests to Gemini 3.8 Flash. Free-tier quotas and availability can change; check the provider's current pricing and quota page before relying on a model.
 
-The proxy forwards requests to HTTPS provider endpoints and blocks local/private-network targets. GitHub Pages alone cannot run this Python proxy; run the included launcher on your computer.
+## Skills
 
-Agent workspace commands execute on your computer inside the selected project folder. They are allowlisted and ask for confirmation, but they are not an OS-level sandbox. Do not approve commands or dependencies from projects you do not trust.
+The core skills are stored in `skills/<skill-name>/SKILL.md` and are available immediately. Open **Agent tools → Agent skills → Upload skill** to add a personal skill. Custom uploads are stored under `user_skills/`, which is ignored by Git so private skills are not accidentally committed.
 
-## Current limitations
+A skill is reusable instructions, not model fine-tuning. Agent mode loads relevant skill instructions during a task.
 
-- Chat requests are non-streaming.
-- No image/file upload, voice, or built-in web search.
-- Agent tools are limited to the local tools provided by this app; it does not have unrestricted computer or terminal access.
-- Provider feature support varies by model.
+See [docs/skills.md](docs/skills.md).
+
+## Chat attachments
+
+The first release supports up to 3 attachments per message. Each file is limited to 2 MB and the message to 4 MB total. Text and code files are included in the model context; images are sent as image inputs and require a vision-capable model. PDF, DOCX, audio, video, and archive attachments are not supported as chat attachments yet. Skill ZIP uploads are a separate feature.
+
+Uploads are stored in the active local project under `uploads/`. Agent-generated files can be returned with a download link using the project file tools.
+
+## GitHub MCP
+
+Open **Agent tools → GitHub MCP**, paste a fine-grained GitHub Personal Access Token, and click **Connect GitHub**. Keep **Read-only mode** enabled initially. This connects the Vibe Calling agent to the official hosted GitHub MCP service and loads the available tool schemas. If write access is deliberately enabled, each write-capable tool call asks for confirmation.
+
+The PAT is stored in this browser's local storage and is not encrypted by this app. Scope it to only the repositories and permissions required. Do not paste it into the chat or commit it to the repository.
+
+See [docs/agent-tools-and-mcp.md](docs/agent-tools-and-mcp.md).
+
+## Important security boundaries
+
+- The Python server binds to `127.0.0.1`; do not expose it to the public internet.
+- Provider API keys and the GitHub PAT are stored in browser local storage. They persist after reloads but are not encrypted by this app. Avoid shared browser profiles.
+- The local proxy never saves or logs provider request bodies or credentials. It restricts outbound provider URLs to HTTPS and blocks private-network targets.
+- Project tools operate only inside `projects/<project-id>/` and reject traversal, symbolic links, and secret/private-key files.
+- Approved project commands execute on the user's computer. The allowlist and confirmation dialog are safeguards, not an OS-level sandbox.
+- GitHub MCP write actions are off by default. Only grant narrow permissions and approve actions you understand.
+- Uploaded files are stored locally and are not executed by the upload feature.
+
+## Known limitations
+
+- Chat completions are non-streaming.
+- Provider support for tool calls and images varies. A non-vision model may reject image attachments.
+- Chat attachments do not yet support PDF, Word, audio, or video files.
+- Project preview serves a static `index.html`. Dynamic frameworks that require long-running dev servers are not yet previewed automatically.
+- Browser-testing skill guides testing, but this edition does not include a real browser automation engine or server-hosted computer use.
+- Remote Browser / Computer Use is a planned Beta panel only; no browser session is currently running on a server.
+- Free-model discovery is conservative. Providers that do not disclose free pricing may return an empty model list rather than showing unverified paid models.
+- API provider feature support varies by model and account quota.
+
+## Project files
+
+- `index.html` — interface and embedded application script.
+- `app.js` — editable source of the embedded application script; keep both copies synchronized.
+- `styles.css` — visual system and layout.
+- `server.py` — local server, provider proxy, skill manager, attachments, downloads, and GitHub MCP transport.
+- `skills/` — built-in agent skills.
+- `user_skills/` — imported personal skills (ignored by Git).
+- `projects/` — agent-created projects and chat uploads.
+- `tests/` — server safety and bundle consistency tests.
 
 License: MIT
