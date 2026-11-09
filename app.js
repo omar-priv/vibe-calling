@@ -584,7 +584,11 @@ async function send(text,attachments=[]){
   const agentMode=$("#agentToggle").checked;let skillContext="",memoryContext="";
   if(agentMode){
    setAgentProgress("Loading relevant skills…");
-   try{skillContext=await relevantSkillInstructions(text)}catch(error){skillContext="Relevant skills could not be preloaded: "+error.message}
+   if(!skillCatalog.length){
+    try{const listed=await skillsRequest({action:"list"});skillCatalog=listed.skills||[];renderSkills()}
+    catch(error){skillContext="Skill catalog could not be loaded: "+error.message}
+   }
+   try{skillContext+=(skillContext?"\n\n":"")+await relevantSkillInstructions(text)}catch(error){skillContext+="\n\nRelevant skills could not be preloaded: "+error.message}
    if(activeProject){
     try{const data=await workspaceRequest({action:"read_memory",project:activeProject});memoryContext="\n\nACTIVE PROJECT: "+activeProject+"\nPERSISTENT PROJECT MEMORY:\n"+JSON.stringify(data.memory,null,2)}
     catch(error){memoryContext="\n\nProject memory could not be loaded: "+error.message}
