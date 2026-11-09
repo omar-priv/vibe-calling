@@ -151,3 +151,12 @@ The workspace can start supported project development servers after a user confi
 The server binds to `127.0.0.1` on a dynamically selected port. Readiness is confirmed by an actual TCP connection before a start operation reports success. The Agent tools workspace panel can display the project runtime and memory, and provides Start app / Stop app controls. The server tracks child process groups so stopping a project also stops its development-server subprocesses. Projects with unrecognized Python or Node entry points are not reported as ready; add a static `index.html` for static preview or use a supported development server.
 
 Build/test/package installation commands remain allowlisted and require explicit per-command approval. `python -m pip install -r requirements.txt` is supported only when that file exists in the selected project. A command with a non-zero exit code is returned to the model as a failed tool result, not as a successful tool call.
+
+
+## Live Agent activity and provider streaming
+
+Agent mode requests OpenAI-compatible chat completions with `stream: true`. The local proxy relays Server-Sent Events incrementally instead of buffering the full model response. The client renders text as it arrives, accumulates streamed tool-call deltas, and displays actual tool starts/results in a live execution log.
+
+If the provider emits explicit reasoning-summary fields in streaming deltas (for example `reasoning_content`, `reasoning`, or `reasoning_summary` as text), Vibe Calling displays them in a separate **Model reasoning summary** panel. It does not infer or reveal private hidden chain-of-thought. Providers that do not expose such a field still show streamed assistant commentary/plans when supplied, plus real tool execution updates.
+
+If the provider does not return SSE, the client accepts a normal JSON completion as a compatibility fallback. Non-Agent chat behavior remains unchanged. Streaming depends on the selected provider supporting OpenAI-compatible streaming; if unsupported, the provider may return an error or a non-streaming response.
