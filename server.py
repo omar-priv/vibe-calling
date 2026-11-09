@@ -1189,8 +1189,12 @@ class Handler(SimpleHTTPRequestHandler):
                     except (BrokenPipeError, ConnectionResetError):
                         pass
                     break
-                self.wfile.write(chunk)
-                self.wfile.flush()
+                try:
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    # The user pressed Stop or closed the stream; end quietly.
+                    return
 
     def send_json(self, status, value):
         data = json_bytes(value)
