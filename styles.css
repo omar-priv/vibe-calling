@@ -1014,3 +1014,34 @@ body {
   .agent-running { margin:8px 11px 14px;align-items:flex-start; }
   .project-memory-heading { align-items:flex-start;flex-direction:column; }
 }
+
+
+/* Live Agent activity: distinguish provider reasoning summaries from real tool execution */
+.agent-running {
+  display:block;
+  width:min(100%,850px);
+  margin:8px auto 18px;
+  padding:12px 14px;
+  border:1px solid #344b48;
+  border-radius:11px;
+  background:linear-gradient(145deg,#101c1e,#111719);
+  color:#c5d8ce;
+  font-size:11px;
+  line-height:1.65;
+  box-shadow:0 8px 24px rgba(0,0,0,.14);
+}
+.agent-live-head {display:flex;align-items:center;gap:10px;min-width:0}
+.agent-live-head strong {flex:1;min-width:0;overflow-wrap:anywhere;font-size:11px;font-weight:600;color:#d5e8dc}
+.agent-live-reasoning,.agent-live-plan,.agent-live-tools {margin-top:12px;padding-top:10px;border-top:1px solid #263b3a}
+.agent-live-label {display:block;margin-bottom:6px;color:#8cb8a4;font-size:8px;font-weight:700;letter-spacing:1.1px}
+#agentReasoningText,#agentLivePlanText {max-height:180px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;color:#c6d9ce;font-size:10px}
+#agentLivePlanText {color:#d9e5dc}
+#agentLiveToolList {display:grid;gap:5px;margin:0;padding-left:18px;color:#a9c4b7;font-size:10px}
+#agentLiveToolList li {padding-left:2px;overflow-wrap:anywhere}
+#agentLiveToolList li[data-done="true"] {color:#8ebd9c}
+@media(max-width:680px) {
+ .agent-running {margin:8px 8px 14px;padding:10px}
+ .agent-live-head {flex-wrap:wrap}
+ .agent-live-head strong {min-width:60%}
+ #agentReasoningText,#agentLivePlanText {max-height:140px}
+}
