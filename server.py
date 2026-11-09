@@ -13,6 +13,7 @@ import socket
 import ssl
 import subprocess
 import sys
+import uuid
 import urllib.error
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +22,8 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
 WORKSPACE_ROOT = ROOT / "projects"
+if WORKSPACE_ROOT.is_symlink():
+    raise RuntimeError("The local projects directory cannot be a symbolic link.")
 WORKSPACE_ROOT.mkdir(exist_ok=True)
 HOST = "127.0.0.1"
 PORT = 8765
@@ -31,7 +34,8 @@ HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 PROJECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,49}$")
 SAFE_COMMAND_TOKEN_RE = re.compile(r"^[A-Za-z0-9_./:@=+,-]+$")
 IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", "dist", "build", "coverage"}
-BLOCKED_FILES = {".env", ".env.local", ".env.production", ".env.development", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"}
+BLOCKED_FILES = {".env", ".env.local", ".env.production", ".env.development", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"}
+BLOCKED_WORKSPACE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".next", ".ssh", ".aws"}
 MAX_WORKSPACE_FILE_BYTES = 2 * 1024 * 1024
 
 
@@ -76,6 +80,15 @@ def validate_target(base_url):
     return parts, host, port, path
 
 
+def blocked_workspace_name(name):
+    lowered = name.lower()
+    if lowered.startswith(".env") and lowered not in {".env.example", ".env.sample"}:
+        return True
+    if lowered in BLOCKED_FILES or lowered in BLOCKED_WORKSPACE_DIRS:
+        return True
+    return lowered.endswith((".pem", ".key", ".p12", ".pfx", ".keystore"))
+
+
 def project_dir(project_id, must_exist=True):
     if not isinstance(project_id, str) or not PROJECT_ID_RE.fullmatch(project_id):
         raise ValueError("Invalid project ID.")
@@ -100,7 +113,7 @@ def safe_workspace_path(project_id, relative_path):
     parts = normalized.split("/")
     if normalized.startswith("/") or any(part in {"", ".", ".."} for part in parts):
         raise ValueError("Use a project-relative path without '..' or empty path segments.")
-    if any(part in BLOCKED_FILES or part.lower().endswith((".pem", ".key", ".p12", ".pfx")) for part in parts):
+    if any(blocked_workspace_name(part) for part in parts):
         raise ValueError("Secret and private-key files are blocked from agent access.")
     target = (base.joinpath(*parts)).resolve()
     try:
@@ -123,7 +136,7 @@ def list_project_files(project_id):
         for filename in files:
             path = Path(current) / filename
             relative = path.relative_to(base).as_posix()
-            if filename in BLOCKED_FILES or filename.lower().endswith((".pem", ".key", ".p12", ".pfx")):
+            if blocked_workspace_name(filename):
                 continue
             if path.is_symlink():
                 continue
@@ -173,11 +186,11 @@ def run_project_command(project_id, command):
         )
     if not allowed:
         raise ValueError(
-            "Command is not in the safe allowlist. Allowed: npm install/ci, npm run build/test/lint/dev/start, "
+            "Command is not in the safe allowlist. Allowed: npm install/ci, npm run build/test/lint, "
             "npx playwright test, python -m compileall/pytest/unittest, and read-only git status/diff/log."
         )
-    if any(not SAFE_COMMAND_TOKEN_RE.fullmatch(arg) for arg in args):
-        raise ValueError("Command contains an unsupported argument.")
+    if any(not SAFE_COMMAND_TOKEN_RE.fullmatch(arg) or ".." in arg or arg.startswith("/") for arg in args):
+        raise ValueError("Command contains an unsupported or out-of-project argument.")
     resolved = shutil.which(parts[0])
     if not resolved:
         raise ValueError(f"'{parts[0]}' is not installed or not on PATH.")
@@ -298,7 +311,7 @@ class Handler(SimpleHTTPRequestHandler):
                 raise ValueError("Enter a project name (1–100 characters).")
             slug = re.sub(r"[^a-z0-9._-]+", "-", name.strip().lower()).strip("-._")
             if not slug:
-                raise ValueError("Project name must contain English letters or numbers.")
+                slug = "project-" + uuid.uuid4().hex[:8]
             slug = slug[:50]
             target = project_dir(slug, must_exist=False)
             if target.exists():
