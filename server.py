@@ -3,8 +3,12 @@
 
 The server binds only to 127.0.0.1. It never persists or logs provider API keys.
 """
+import base64
+import binascii
 import ipaddress
+import io
 import json
+import mimetypes
 import os
 import re
 import shlex
@@ -16,6 +20,8 @@ import sys
 import uuid
 import urllib.error
 import urllib.request
+import zipfile
+from urllib.parse import unquote, quote
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -37,6 +43,167 @@ IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next",
 BLOCKED_FILES = {".env", ".env.local", ".env.production", ".env.development", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"}
 BLOCKED_WORKSPACE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".next", ".ssh", ".aws"}
 MAX_WORKSPACE_FILE_BYTES = 2 * 1024 * 1024
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+MAX_SKILL_ARCHIVE_BYTES = 3 * 1024 * 1024
+SKILLS_ROOT = ROOT / "skills"
+USER_SKILLS_ROOT = ROOT / "user_skills"
+SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,59}$")
+SKILL_ALLOWED_EXTENSIONS = {".md", ".txt", ".json", ".yaml", ".yml"}
+UPLOAD_ALLOWED_EXTENSIONS = {
+    ".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".xml", ".html", ".htm",
+    ".css", ".js", ".jsx", ".ts", ".tsx", ".py", ".sql", ".toml",
+    ".png", ".jpg", ".jpeg", ".webp", ".gif"
+}
+
+
+def _skill_meta(content, fallback):
+    name = fallback
+    description = ""
+    lines = content.splitlines()[:30]
+    if lines and lines[0].strip() == "---":
+        for line in lines[1:]:
+            if line.strip() == "---":
+                break
+            key, sep, value = line.partition(":")
+            if sep and key.strip().lower() in {"name", "description"}:
+                cleaned = value.strip().strip("\\\"'").strip()
+                if key.strip().lower() == "name" and cleaned:
+                    name = cleaned
+                elif key.strip().lower() == "description":
+                    description = cleaned
+    return name[:100], description[:300]
+
+
+def list_available_skills():
+    results = []
+    for base, origin in ((SKILLS_ROOT, "built-in"), (USER_SKILLS_ROOT, "custom")):
+        if not base.is_dir() or base.is_symlink():
+            continue
+        for entry in sorted(base.iterdir(), key=lambda item: item.name.lower()):
+            if not entry.is_dir() or entry.is_symlink() or not SKILL_NAME_RE.fullmatch(entry.name):
+                continue
+            skill_file = entry / "SKILL.md"
+            if not skill_file.is_file() or skill_file.is_symlink():
+                continue
+            try:
+                if skill_file.stat().st_size > 128 * 1024:
+                    continue
+                content = skill_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            name, description = _skill_meta(content, entry.name)
+            results.append({"id": entry.name if origin == "built-in" else "custom:" + entry.name,
+                            "name": name, "description": description, "source": origin})
+    return results
+
+
+def read_available_skill(skill_id):
+    if not isinstance(skill_id, str) or len(skill_id) > 80:
+        raise ValueError("Invalid skill ID.")
+    if skill_id.startswith("custom:"):
+        slug = skill_id[7:]
+        base = USER_SKILLS_ROOT
+    else:
+        slug = skill_id
+        base = SKILLS_ROOT
+    if not SKILL_NAME_RE.fullmatch(slug):
+        raise ValueError("Invalid skill ID.")
+    folder = base / slug
+    target = folder / "SKILL.md"
+    if folder.is_symlink() or target.is_symlink() or not target.is_file():
+        raise ValueError("Skill was not found.")
+    resolved = target.resolve()
+    try:
+        resolved.relative_to(base.resolve())
+    except ValueError:
+        raise ValueError("Skill path is outside the skills directory.")
+    if resolved.stat().st_size > 128 * 1024:
+        raise ValueError("Skill file exceeds the 128 KB limit.")
+    return resolved.read_text(encoding="utf-8")
+
+
+def install_skill_upload(filename, encoded):
+    if not isinstance(filename, str) or not isinstance(encoded, str):
+        raise ValueError("A skill file or ZIP archive is required.")
+    if len(encoded) > (MAX_SKILL_ARCHIVE_BYTES * 4 // 3 + 16):
+        raise ValueError("Skill upload exceeds the 3 MB limit.")
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("Skill upload is not valid Base64.")
+    if not raw or len(raw) > MAX_SKILL_ARCHIVE_BYTES:
+        raise ValueError("Skill upload is empty or exceeds the 3 MB limit.")
+    USER_SKILLS_ROOT.mkdir(exist_ok=True)
+    if filename.lower().endswith(".md"):
+        slug = re.sub(r"[^a-z0-9-]+", "-", Path(filename).stem.lower()).strip("-")[:60]
+        if not SKILL_NAME_RE.fullmatch(slug):
+            raise ValueError("Use a simple skill filename such as research-helper.md.")
+        files = {"SKILL.md": raw}
+        root_slug = slug
+    elif filename.lower().endswith(".zip"):
+        files = {}
+        try:
+            archive = zipfile.ZipFile(io.BytesIO(raw))
+        except zipfile.BadZipFile:
+            raise ValueError("This ZIP file is invalid.")
+        with archive:
+            members = [m for m in archive.infolist() if not m.is_dir()]
+            if len(members) > 30:
+                raise ValueError("A skill archive can contain up to 30 files.")
+            total = 0
+            for member in members:
+                name = member.filename.replace("\\\\", "/")
+                parts = name.split("/")
+                if name.startswith("/") or any(p in {"", ".", ".."} for p in parts):
+                    raise ValueError("The ZIP contains an unsafe path.")
+                if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise ValueError("Symbolic links are not allowed in skill archives.")
+                suffix = Path(parts[-1]).suffix.lower()
+                if suffix not in SKILL_ALLOWED_EXTENSIONS:
+                    raise ValueError("Skill archives may contain Markdown and text reference files only.")
+                if member.file_size > 256 * 1024:
+                    raise ValueError("A skill archive file exceeds 256 KB.")
+                total += member.file_size
+                if total > MAX_SKILL_ARCHIVE_BYTES:
+                    raise ValueError("The extracted skill exceeds the 3 MB limit.")
+                relative = "/".join(parts[1:]) if len(parts) > 1 else parts[0]
+                if not relative:
+                    continue
+                files[relative] = archive.read(member)
+        skill_paths = [p for p in files if Path(p).name == "SKILL.md"]
+        if len(skill_paths) != 1:
+            raise ValueError("The ZIP must contain exactly one SKILL.md file.")
+        top = skill_paths[0].split("/")[0]
+        root_slug = re.sub(r"[^a-z0-9-]+", "-", top.lower()).strip("-")[:60]
+        if not SKILL_NAME_RE.fullmatch(root_slug):
+            root_slug = "uploaded-skill"
+        skill_prefix = skill_paths[0].rsplit("/", 1)[0] if "/" in skill_paths[0] else ""
+        if skill_prefix:
+            files = {p[len(skill_prefix) + 1:]: data for p, data in files.items() if p.startswith(skill_prefix + "/")}
+    else:
+        raise ValueError("Upload a .md file or a .zip skill package.")
+    if "SKILL.md" not in files:
+        raise ValueError("The skill package must include SKILL.md.")
+    for name, content in files.items():
+        if Path(name).suffix.lower() not in SKILL_ALLOWED_EXTENSIONS or len(content) > 256 * 1024:
+            raise ValueError("Skill package contains an unsupported or oversized file.")
+    try:
+        skill_text = files["SKILL.md"].decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("SKILL.md must be UTF-8 text.")
+    meta_name, meta_description = _skill_meta(skill_text, root_slug)
+    if not meta_description:
+        raise ValueError("SKILL.md needs a short description in its YAML frontmatter.")
+    destination = USER_SKILLS_ROOT / root_slug
+    if destination.exists() and (destination / "SKILL.md").read_text(encoding="utf-8", errors="ignore") != skill_text:
+        root_slug = root_slug[:52] + "-" + uuid.uuid4().hex[:6]
+        destination = USER_SKILLS_ROOT / root_slug
+    destination.mkdir(parents=True, exist_ok=True)
+    for rel, content in files.items():
+        target = destination / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    return {"ok": True, "id": "custom:" + root_slug, "name": meta_name, "description": meta_description}
 
 
 def json_bytes(value):
@@ -255,6 +422,28 @@ class Handler(SimpleHTTPRequestHandler):
         return super().guess_type(path)
 
     def do_GET(self):
+        request_path = unquote(urlsplit(self.path).path)
+        if request_path.startswith("/api/download/"):
+            try:
+                pieces = request_path[len("/api/download/"):].split("/", 1)
+                if len(pieces) != 2:
+                    raise ValueError("Invalid download path.")
+                project, relative = pieces
+                _, target = safe_workspace_path(project, relative)
+                if not target.is_file() or target.stat().st_size > 8 * 1024 * 1024:
+                    raise ValueError("File does not exist or exceeds the 8 MB download limit.")
+                data = target.read_bytes()
+                mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(target.name))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+            except ValueError as exc:
+                self.send_json(404, {"error": str(exc)})
+            return
         if urlsplit(self.path).path == "/__health":
             files = {}
             for name in ("index.html", "app.js", "styles.css"):
@@ -266,7 +455,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = urlsplit(self.path).path
-        if route not in {"/api/proxy", "/api/workspace"}:
+        if route not in {"/api/proxy", "/api/workspace", "/api/skills", "/api/mcp/github"}:
             self.send_json(404, {"error": "Unknown local API route."})
             return
         host_header = (self.headers.get("Host") or "").lower()
@@ -291,14 +480,104 @@ class Handler(SimpleHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
             if route == "/api/proxy":
                 self.handle_proxy(payload)
-            else:
+            elif route == "/api/workspace":
                 self.handle_workspace(payload)
+            elif route == "/api/skills":
+                self.handle_skills(payload)
+            else:
+                self.handle_github_mcp(payload)
         except (UnicodeDecodeError, json.JSONDecodeError):
             self.send_json(400, {"error": "Request body must be valid JSON."})
         except ValueError as exc:
             self.send_json(400, {"error": str(exc)})
         except Exception as exc:
             self.send_json(500, {"error": "Local workspace error: " + str(exc)})
+
+    def handle_skills(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid skills request.")
+        action = payload.get("action")
+        if action == "list":
+            self.send_json(200, {"ok": True, "skills": list_available_skills()})
+            return
+        if action == "read":
+            self.send_json(200, {"ok": True, "content": read_available_skill(payload.get("id"))})
+            return
+        if action == "install":
+            result = install_skill_upload(payload.get("filename", ""), payload.get("content_base64", ""))
+            self.send_json(200, result)
+            return
+        raise ValueError("Unknown skills action.")
+
+    def handle_github_mcp(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid GitHub MCP request.")
+        token = payload.get("token", "")
+        message = payload.get("message")
+        if not isinstance(token, str) or not token.strip() or len(token) > 8192:
+            raise ValueError("GitHub Personal Access Token is required.")
+        if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
+            raise ValueError("Invalid MCP JSON-RPC message.")
+        if len(json_bytes(message)) > 512 * 1024:
+            raise ValueError("MCP request exceeds the 512 KB limit.")
+        method = message.get("method", "")
+        if method not in {"initialize", "notifications/initialized", "tools/list", "tools/call", "ping"}:
+            raise ValueError("Unsupported MCP method.")
+        headers = {
+            "Authorization": "Bearer " + token.strip(),
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            "X-MCP-Toolsets": "repos,issues,pull_requests",
+            "X-MCP-Readonly": "true" if payload.get("read_only", True) else "false",
+            "MCP-Protocol-Version": "2025-03-26",
+        }
+        session_id = payload.get("session_id")
+        if isinstance(session_id, str) and session_id and len(session_id) < 500:
+            headers["MCP-Session-Id"] = session_id
+        request = urllib.request.Request(
+            "https://api.githubcopilot.com/mcp/",
+            data=json_bytes(message),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with OPENER.open(request, timeout=35) as response:
+                raw = response.read(2 * 1024 * 1024 + 1)
+                if len(raw) > 2 * 1024 * 1024:
+                    raise ValueError("GitHub MCP response exceeded the 2 MB limit.")
+                status = response.status
+                content_type = response.headers.get("Content-Type", "application/json")
+                response_session = response.headers.get("MCP-Session-Id") or session_id
+        except urllib.error.HTTPError as exc:
+            raw = exc.read(128 * 1024)
+            status = exc.code
+            content_type = exc.headers.get("Content-Type", "application/json")
+            response_session = exc.headers.get("MCP-Session-Id") or session_id
+        except urllib.error.URLError as exc:
+            raise ValueError("Could not reach the official GitHub MCP server: " + str(exc.reason))
+        parsed = None
+        text_body = raw.decode("utf-8", errors="replace")
+        if "text/event-stream" in content_type.lower():
+            events = []
+            for line in text_body.splitlines():
+                if line.startswith("data:"):
+                    data = line[5:].strip()
+                    if data and data != "[DONE]":
+                        try:
+                            events.append(json.loads(data))
+                        except json.JSONDecodeError:
+                            continue
+            parsed = events[-1] if events else None
+        elif text_body.strip():
+            try:
+                parsed = json.loads(text_body)
+            except json.JSONDecodeError:
+                parsed = {"error": {"message": text_body[:1500]}}
+        if status >= 400:
+            detail = parsed.get("error", {}).get("message", "GitHub MCP returned HTTP " + str(status)) if isinstance(parsed, dict) else "GitHub MCP returned HTTP " + str(status)
+            self.send_json(status, {"ok": False, "error": str(detail)[:1500], "session_id": response_session})
+            return
+        self.send_json(200, {"ok": True, "response": parsed, "session_id": response_session, "content_type": content_type})
 
     def handle_workspace(self, payload):
         if not isinstance(payload, dict):
@@ -340,6 +619,42 @@ class Handler(SimpleHTTPRequestHandler):
             except UnicodeDecodeError:
                 raise ValueError("This file is not UTF-8 text and cannot be read by the agent.")
             self.send_json(200, {"ok": True, "path": payload.get("path"), "content": text})
+            return
+        if action == "upload_attachment":
+            filename = payload.get("filename", "")
+            encoded = payload.get("content_base64", "")
+            if not isinstance(filename, str) or Path(filename).name != filename or len(filename) > 120:
+                raise ValueError("Invalid attachment filename.")
+            suffix = Path(filename).suffix.lower()
+            if suffix not in UPLOAD_ALLOWED_EXTENSIONS:
+                raise ValueError("This file type is not supported. Use common text/code files or PNG/JPG/WEBP/GIF images.")
+            if blocked_workspace_name(filename):
+                raise ValueError("Private and secret files cannot be uploaded.")
+            if not isinstance(encoded, str) or len(encoded) > (MAX_UPLOAD_BYTES * 4 // 3 + 16):
+                raise ValueError("Attachment exceeds the 2 MB limit.")
+            try:
+                content = base64.b64decode(encoded, validate=True)
+            except (binascii.Error, ValueError):
+                raise ValueError("Attachment data is invalid.")
+            if not content or len(content) > MAX_UPLOAD_BYTES:
+                raise ValueError("Attachment is empty or exceeds the 2 MB limit.")
+            folder = project_dir(project) / "uploads"
+            folder.mkdir(exist_ok=True)
+            stored = uuid.uuid4().hex[:10] + "-" + re.sub(r"[^A-Za-z0-9._-]+", "-", filename)[:90]
+            target = folder / stored
+            target.write_bytes(content)
+            self.send_json(200, {"ok": True, "path": "uploads/" + stored, "filename": filename,
+                                 "bytes": len(content), "mime": mimetypes.guess_type(filename)[0] or "application/octet-stream"})
+            return
+        if action == "read_attachment_base64":
+            relative = payload.get("path")
+            _, target = safe_workspace_path(project, relative)
+            if not target.is_file() or not str(relative).startswith("uploads/"):
+                raise ValueError("Attachment was not found.")
+            if target.stat().st_size > MAX_UPLOAD_BYTES:
+                raise ValueError("Attachment exceeds the 2 MB read limit.")
+            self.send_json(200, {"ok": True, "content_base64": base64.b64encode(target.read_bytes()).decode("ascii"),
+                                 "mime": mimetypes.guess_type(target.name)[0] or "application/octet-stream"})
             return
         if action == "write_file":
             relative = payload.get("path")
