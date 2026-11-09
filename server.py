@@ -1120,7 +1120,9 @@ class Handler(SimpleHTTPRequestHandler):
             status = exc.code
             content_type = exc.headers.get("Content-Type", "application/json")
         except urllib.error.URLError as exc:
-            raise ValueError("Could not reach provider: " + str(exc.reason))
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                raise TimeoutError("The provider connection timed out while waiting for its response.") from exc
+            raise ConnectionError("Could not reach provider: " + str(exc.reason)) from exc
 
         self.send_response(status)
         self.send_header("Content-Type", content_type)
