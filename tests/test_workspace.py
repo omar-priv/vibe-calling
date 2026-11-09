@@ -77,6 +77,7 @@ class FrontendBundleTests(unittest.TestCase):
             "workspace_write_file", "workspace_delete_file", "workspace_run_command",
             "workspace_preview", "skill_list", "skill_read", "workspace_download_file",
             "upload_attachment", "read_attachment_base64", "connectGitHubMcp",
+            "connectRemoteMcp", "callRemoteMcpTool", "NVIDIA_FREE_CHAT_MODELS",
         ):
             self.assertIn(name, app)
 
@@ -88,14 +89,52 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertIn('request_path.startswith("/api/download/")', server_source)
         self.assertIn('elif route == "/api/skills":', server_source)
         self.assertIn('self.handle_github_mcp(payload)', server_source)
+        self.assertIn('self.handle_remote_mcp(payload)', server_source)
+        self.assertIn('def validate_remote_mcp_payload(payload):', server_source)
 
     def test_index_exposes_new_controls(self):
         root = Path(__file__).resolve().parents[1]
         html = (root / "index.html").read_text(encoding="utf-8")
         for element_id in ("attachFiles", "fileInput", "skillsGrid", "skillFileInput",
                            "githubPatInput", "githubReadOnly", "connectGithubMcp",
-                           "remoteBrowserHeading"):
+                           "remoteMcpUrl", "remoteMcpToken", "remoteMcpReadOnly",
+                           "saveRemoteMcpSettings", "connectRemoteMcp",
+                           "nvidiaCatalogGrid", "remoteBrowserHeading"):
             self.assertIn('id="' + element_id + '"', html)
+
+
+class RemoteMCPValidationTests(unittest.TestCase):
+    def valid_message(self):
+        return {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+
+    def test_remote_mcp_rejects_non_https_url(self):
+        with self.assertRaisesRegex(ValueError, "HTTPS"):
+            server.validate_remote_mcp_payload({
+                "url": "http://example.com/mcp",
+                "message": self.valid_message(),
+            })
+
+    def test_remote_mcp_rejects_localhost(self):
+        with self.assertRaisesRegex(ValueError, "Local and private"):
+            server.validate_remote_mcp_payload({
+                "url": "https://localhost/mcp",
+                "message": self.valid_message(),
+            })
+
+    def test_remote_mcp_rejects_unsupported_method_without_network_access(self):
+        message = {"jsonrpc": "2.0", "id": 1, "method": "resources/read", "params": {}}
+        with self.assertRaisesRegex(ValueError, "Unsupported MCP method"):
+            server.validate_remote_mcp_payload({
+                "url": "https://example.com/mcp",
+                "message": message,
+            })
+
+    def test_remote_mcp_requires_json_rpc(self):
+        with self.assertRaisesRegex(ValueError, "JSON-RPC"):
+            server.validate_remote_mcp_payload({
+                "url": "https://example.com/mcp",
+                "message": {"method": "tools/list"},
+            })
 
 
 class AgentSkillTests(unittest.TestCase):
@@ -114,6 +153,9 @@ class AgentSkillTests(unittest.TestCase):
             "project-planning", "frontend-design", "frontend-development",
             "backend-design", "backend-development", "browser-testing",
             "debugging", "code-review", "security-review", "github-management",
+            "visual-reference-research", "ux-review", "accessibility-review",
+            "performance-engineering", "api-integration", "mcp-server-integration",
+            "browser-visual-testing", "release-engineering", "web-research",
         }
         self.assertTrue(expected.issubset(skill_ids))
 
@@ -126,6 +168,9 @@ class AgentSkillTests(unittest.TestCase):
         result = server.install_skill_upload("research-helper.md", encoded)
         self.assertEqual(result["id"], "custom:research-helper")
         self.assertIn("primary sources", server.read_available_skill("custom:research-helper"))
+
+    def test_all_builtin_skills_are_counted(self):
+        self.assertEqual(len(server.list_available_skills()), 19)
 
     def test_zip_skill_rejects_parent_traversal(self):
         buffer = io.BytesIO()

@@ -113,3 +113,19 @@ The UI contains a clearly marked planned Beta panel for a server-hosted browser.
 - [MCP architecture](https://modelcontextprotocol.io/docs/learn/architecture)
 - [GitHub MCP remote server](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md)
 - [GitHub MCP server configuration](https://github.com/github/github-mcp-server/blob/main/docs/server-configuration.md)
+
+## Connect another remote MCP server
+
+The **Connect another MCP server** panel supports remote MCP servers using **Streamable HTTP over HTTPS**. It is separate from the GitHub MCP integration above.
+
+1. Copy the server's Streamable HTTP endpoint URL from its official setup page.
+2. Enter a connection name and the full HTTPS endpoint URL in **Agent tools**.
+3. Paste a bearer token only when the MCP provider requires it. OAuth sign-in, custom authentication headers, and local `stdio` processes are not supported by this connector.
+4. Keep **Read-only mode** enabled and click **Connect MCP**.
+5. Enable Agent mode in Chat. The remote server's discovered tools will be offered to the model.
+
+The remote URL is validated for HTTPS and public network addressing. Localhost and private-network destinations are blocked. The server receives requests and the bearer token, so connect only servers you trust. The token is stored in this browser's local storage without encryption. Do not use a shared browser profile.
+
+Read-only mode allows only tools explicitly marked `readOnlyHint: true`. Other tools are blocked until read-only mode is turned off; each write-capable or unclassified tool call then needs a separate confirmation. A remote server may not enforce the Vibe Calling UI's policy itself, so keep server permissions and token scopes narrow.
+
+This connector targets **remote Streamable HTTP**. A local MCP server that requires `stdio` must be launched and supervised by a local process manager; entering its command into this URL field will not work. Remote Browser / Computer Use remains a separate planned Beta feature.

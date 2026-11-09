@@ -247,6 +247,29 @@ def validate_target(base_url):
     return parts, host, port, path
 
 
+def validate_remote_mcp_payload(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid remote MCP request.")
+    url = payload.get("url", "")
+    token = payload.get("token", "")
+    message = payload.get("message")
+    if not isinstance(url, str) or not url.strip() or len(url) > 2048:
+        raise ValueError("Remote MCP HTTPS URL is required.")
+    if not isinstance(token, str) or len(token) > 8192:
+        raise ValueError("Remote MCP token is invalid.")
+    if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
+        raise ValueError("Invalid MCP JSON-RPC message.")
+    if len(json_bytes(message)) > 512 * 1024:
+        raise ValueError("MCP request exceeds the 512 KB limit.")
+    method = message.get("method", "")
+    if method not in {"initialize", "notifications/initialized", "tools/list", "tools/call", "ping"}:
+        raise ValueError("Unsupported MCP method.")
+    # Reuse the provider proxy's HTTPS, DNS, and public-IP checks. Query strings,
+    # embedded credentials, localhost, and private-network destinations are blocked.
+    parts, host, port, prefix = validate_target(url.strip())
+    return parts, host, port, prefix, token.strip(), message, method
+
+
 def blocked_workspace_name(name):
     lowered = name.lower()
     if lowered.startswith(".env") and lowered not in {".env.example", ".env.sample"}:
@@ -455,7 +478,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = urlsplit(self.path).path
-        if route not in {"/api/proxy", "/api/workspace", "/api/skills", "/api/mcp/github"}:
+        if route not in {"/api/proxy", "/api/workspace", "/api/skills", "/api/mcp/github", "/api/mcp/remote"}:
             self.send_json(404, {"error": "Unknown local API route."})
             return
         host_header = (self.headers.get("Host") or "").lower()
@@ -484,8 +507,10 @@ class Handler(SimpleHTTPRequestHandler):
                 self.handle_workspace(payload)
             elif route == "/api/skills":
                 self.handle_skills(payload)
-            else:
+            elif route == "/api/mcp/github":
                 self.handle_github_mcp(payload)
+            else:
+                self.handle_remote_mcp(payload)
         except (UnicodeDecodeError, json.JSONDecodeError):
             self.send_json(400, {"error": "Request body must be valid JSON."})
         except ValueError as exc:
@@ -576,6 +601,71 @@ class Handler(SimpleHTTPRequestHandler):
                 parsed = {"error": {"message": text_body[:1500]}}
         if status >= 400:
             detail = parsed.get("error", {}).get("message", "GitHub MCP returned HTTP " + str(status)) if isinstance(parsed, dict) else "GitHub MCP returned HTTP " + str(status)
+            self.send_json(status, {"ok": False, "error": str(detail)[:1500], "session_id": response_session})
+            return
+        self.send_json(200, {"ok": True, "response": parsed, "session_id": response_session, "content_type": content_type})
+
+
+    def handle_remote_mcp(self, payload):
+        parts, host, port, prefix, token, message, method = validate_remote_mcp_payload(payload)
+        path = parts.path.rstrip("/") or "/"
+        target_url = f"https://{host}" + (f":{port}" if port != 443 else "") + path
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json",
+            "X-MCP-Readonly": "true" if payload.get("read_only", True) else "false",
+        }
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        if method != "initialize":
+            headers["MCP-Protocol-Version"] = str(
+                message.get("params", {}).get("protocolVersion", "2025-03-26")
+                if method == "initialize" else "2025-03-26"
+            )
+        session_id = payload.get("session_id")
+        if isinstance(session_id, str) and session_id and len(session_id) < 500:
+            headers["MCP-Session-Id"] = session_id
+        request = urllib.request.Request(
+            target_url,
+            data=json_bytes(message),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with OPENER.open(request, timeout=35) as response:
+                raw = response.read(2 * 1024 * 1024 + 1)
+                if len(raw) > 2 * 1024 * 1024:
+                    raise ValueError("Remote MCP response exceeded the 2 MB limit.")
+                status = response.status
+                content_type = response.headers.get("Content-Type", "application/json")
+                response_session = response.headers.get("MCP-Session-Id") or session_id
+        except urllib.error.HTTPError as exc:
+            raw = exc.read(128 * 1024)
+            status = exc.code
+            content_type = exc.headers.get("Content-Type", "application/json")
+            response_session = exc.headers.get("MCP-Session-Id") or session_id
+        except urllib.error.URLError as exc:
+            raise ValueError("Could not reach the remote MCP server: " + str(exc.reason))
+        text_body = raw.decode("utf-8", errors="replace")
+        parsed = None
+        if "text/event-stream" in content_type.lower():
+            events = []
+            for line in text_body.splitlines():
+                if line.startswith("data:"):
+                    data = line[5:].strip()
+                    if data and data != "[DONE]":
+                        try:
+                            events.append(json.loads(data))
+                        except json.JSONDecodeError:
+                            continue
+            parsed = events[-1] if events else None
+        elif text_body.strip():
+            try:
+                parsed = json.loads(text_body)
+            except json.JSONDecodeError:
+                parsed = {"error": {"message": text_body[:1500]}}
+        if status >= 400:
+            detail = parsed.get("error", {}).get("message", "Remote MCP returned HTTP " + str(status)) if isinstance(parsed, dict) else "Remote MCP returned HTTP " + str(status)
             self.send_json(status, {"ok": False, "error": str(detail)[:1500], "session_id": response_session})
             return
         self.send_json(200, {"ok": True, "response": parsed, "session_id": response_session, "content_type": content_type})

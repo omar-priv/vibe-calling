@@ -2,7 +2,7 @@
 (() => {
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const KEYS={providers:"vc_providers_v1",chats:"vc_chats_v1",notes:"vc_notes_v1",mcp:"vc_github_mcp_v1"};
+const KEYS={providers:"vc_providers_v1",chats:"vc_chats_v1",notes:"vc_notes_v1",mcp:"vc_github_mcp_v1",remoteMcp:"vc_remote_mcp_v1"};
 const presets={custom:{name:"Custom provider",url:"",model:""},nvidia:{name:"NVIDIA NIM",url:"https://integrate.api.nvidia.com/v1",model:""},gemini:{name:"Google Gemini",url:"https://generativelanguage.googleapis.com/v1beta/openai",model:""},openai:{name:"OpenAI",url:"https://api.openai.com/v1",model:"gpt-4o-mini"},openrouter:{name:"OpenRouter",url:"https://openrouter.ai/api/v1",model:""},groq:{name:"Groq",url:"https://api.groq.com/openai/v1",model:""}};
 const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
 let providers=read(KEYS.providers,[]),chats=read(KEYS.chats,[]),notes=read(KEYS.notes,[]);
@@ -10,7 +10,9 @@ if(!Array.isArray(providers))providers=[];if(!Array.isArray(chats))chats=[];if(!
 let chatId=chats[0]?.id||null,editingId=null,busy=false,controller=null,pendingModels=[],pendingFreeSource="";
 let mcpConfig=read(KEYS.mcp,{token:"",readOnly:true,sessionId:"",connected:false});
 if(!mcpConfig||typeof mcpConfig!=="object")mcpConfig={token:"",readOnly:true,sessionId:"",connected:false};
-let githubMcpTools=[],githubMcpToolMap={},skillCatalog=[],pendingAttachments=[];
+let githubMcpTools=[],githubMcpToolMap={},remoteMcpTools=[],remoteMcpToolMap={},skillCatalog=[],pendingAttachments=[];
+let remoteMcpConfig=read(KEYS.remoteMcp,{name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false});
+if(!remoteMcpConfig||typeof remoteMcpConfig!=="object")remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};
 const uid=()=>globalThis.crypto?.randomUUID?.()||("vc-"+Date.now()+"-"+Math.random().toString(36).slice(2));
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 function toast(s){const el=$("#toast");if(!el){console.log(s);return}el.textContent=s;el.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove("show"),3000)}
@@ -35,6 +37,24 @@ function renderModels(preferred){
  if(opts.some(o=>o.value===old))el.value=old;
  $("#tokenHint").textContent=opts.length?opts.length+" verified free model(s)":"Free models only · unverified models are hidden";
  $("#providerCount").textContent=String(providers.length);
+}
+
+function renderNvidiaCatalog(){
+ const grid=$("#nvidiaCatalogGrid");if(!grid)return;
+ grid.innerHTML=NVIDIA_FREE_CHAT_MODELS.map((model,index)=>'<article class="nvidia-model-card"><div class="nvidia-model-top"><span class="nvidia-model-index">'+String(index+1).padStart(2,"0")+'</span><span class="free-tag">FREE ENDPOINT</span></div><h3>'+esc(model.name)+'</h3><p class="nvidia-model-id">'+esc(model.id)+'</p><div class="nvidia-model-meta"><span>Updated '+esc(model.updated)+'</span><span>'+esc(model.context)+' context</span></div><div class="nvidia-model-tags">'+esc(model.tags)+' · '+esc(model.input)+'</div><div class="nvidia-model-actions"><button type="button" class="secondary-button" data-add-nvidia-model="'+esc(model.id)+'">Add to model list</button><a href="'+esc(model.url)+'" target="_blank" rel="noopener noreferrer">Model details ↗</a></div></article>').join("");
+}
+function chooseNvidiaModel(modelId){
+ const model=NVIDIA_FREE_CHAT_MODELS.find(item=>item.id===modelId);if(!model)return;
+ let provider=providers.find(item=>providerHost(item)==="integrate.api.nvidia.com");
+ if(!provider){
+  openProvider();$("#providerPreset").value="nvidia";$("#providerPreset").dispatchEvent(new Event("change",{bubbles:true}));
+  $("#providerName").value="NVIDIA NIM";$("#providerUrl").value="https://integrate.api.nvidia.com/v1";$("#providerModel").value=model.id;
+  pendingModels=NVIDIA_FREE_CHAT_MODELS.map(item=>item.id);pendingFreeSource="integrate.api.nvidia.com";
+  $("#providerFeedback").textContent="Add your NVIDIA API key, then save. The free chat models are preloaded.";
+  return;
+ }
+ provider.models=NVIDIA_FREE_CHAT_MODELS.map(item=>item.id);provider.freeModelSource="integrate.api.nvidia.com";provider.defaultModel=model.id;
+ saveProviders();$("#modelSelect").value=provider.id+"::"+model.id;toast(model.name+" selected");
 }
 function renderProviders(){const grid=$("#providerGrid");if(!grid)return;if(!providers.length){grid.innerHTML='<div class="empty-state">No providers connected yet.<br><br>Add NVIDIA, Gemini, OpenAI, Groq, OpenRouter, or a compatible endpoint.</div>';return}grid.innerHTML=providers.map(p=>{let host="Custom endpoint";try{host=new URL(p.baseUrl).hostname}catch{}return '<article class="provider-card"><div class="provider-card-head"><div class="provider-logo">'+esc((p.name||"P").slice(0,1).toUpperCase())+'</div><div><h3>'+esc(p.name||"Provider")+'</h3><small>'+esc(host)+'</small></div></div><div class="provider-model">'+esc(p.models?.length?p.models.length+" models available":p.defaultModel||"No model selected")+'</div><div class="provider-card-actions"><button type="button" data-edit="'+esc(p.id)+'">Edit</button><button type="button" data-refresh="'+esc(p.id)+'">Refresh models</button><button type="button" class="delete-provider" data-delete="'+esc(p.id)+'">Delete</button></div></article>'}).join("")}
 function markdown(s){
@@ -63,15 +83,35 @@ function renderChat(){
  if(nearBottom)chatBox.scrollTo(0,chatBox.scrollHeight);
 }
 function openProvider(providerId){pendingModels=[];editingId=providerId||null;const p=providerId?byId(providerId):null;pendingFreeSource=p?.freeModelSource||"";$("#providerDialogTitle").textContent=p?"Edit provider":"Add a provider";$("#providerPreset").value="custom";$("#providerName").value=p?.name||"";$("#providerUrl").value=p?.baseUrl||"";$("#providerKey").value=p?.apiKey||"";$("#providerModel").value=p?.defaultModel||"";$("#providerHeader").value=p?.customHeader||"";$("#providerHeaderValue").value=p?.customHeaderValue||"";$("#providerFeedback").textContent="";$("#providerFeedback").className="feedback";$("#providerDialog").showModal()}
-function providerFromForm(){return{id:editingId||uid(),name:$("#providerName").value.trim()||"My provider",baseUrl:cleanUrl($("#providerUrl").value),apiKey:$("#providerKey").value.trim(),defaultModel:$("#providerModel").value.trim(),models:pendingModels.length?pendingModels:(editingId?(byId(editingId)?.models||[]):[]),freeModelSource:pendingFreeSource,customHeader:$("#providerHeader").value.trim(),customHeaderValue:$("#providerHeaderValue").value}}
+function providerFromForm(){
+ const baseUrl=cleanUrl($("#providerUrl").value),host=(()=>{try{return new URL(baseUrl).hostname.toLowerCase()}catch{return""}})(),isNvidia=host==="integrate.api.nvidia.com";
+ const models=isNvidia?NVIDIA_FREE_CHAT_MODELS.map(model=>model.id):(pendingModels.length?pendingModels:(editingId?(byId(editingId)?.models||[]):[]));
+ return{id:editingId||uid(),name:$("#providerName").value.trim()||"My provider",baseUrl,apiKey:$("#providerKey").value.trim(),defaultModel:$("#providerModel").value.trim(),models,freeModelSource:isNvidia?host:pendingFreeSource,customHeader:$("#providerHeader").value.trim(),customHeaderValue:$("#providerHeaderValue").value};
+}
 function requestBody(p,path,method,body){return{baseUrl:cleanUrl(p.baseUrl),path,method,apiKey:p.apiKey,customHeader:p.customHeader||"",customHeaderValue:p.customHeaderValue||"",body:body??null}}
 async function api(p,path,method="GET",body=null,signal){let r;try{r=await fetch("/api/proxy",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(requestBody(p,path,method,body)),signal})}catch(e){if(e.name==="AbortError")throw e;throw new Error("Could not reach local server. Run start.bat and open http://127.0.0.1:8765")}const raw=await r.text();if(!r.ok)throw new Error("HTTP "+r.status+": "+raw.slice(0,450));try{return raw?JSON.parse(raw):{}}catch{throw new Error("Provider response is not valid JSON")}}
 const GEMINI_FREE_MODELS=new Set(["gemini-3.8-flash","gemini-3.6-flash","gemini-3.5-flash-lite","gemini-3.1-flash-lite","gemini-3-flash-preview","gemini-2.5-flash","gemini-2.5-flash-lite"]);
+/* Catalog snapshot: only NVIDIA Free Endpoints with a documented programmatic Chat Completions example. Newest first. */
+const NVIDIA_FREE_CHAT_MODELS=[
+ {id:"mistralai/mistral-large-4-1t-a52b",name:"Mistral Large 4",updated:"11 days ago",context:"262K",input:"Text + Image",tags:"Reasoning · Tools",url:"https://build.nvidia.com/mistralai/mistral-large-4-1t-a52b"},
+ {id:"nvidia/nemotron-3.5-bolt-e4b",name:"Nemotron 3.5 Bolt E4B",updated:"17 days ago",context:"66K",input:"Text",tags:"Fast · Agentic · Tools",url:"https://build.nvidia.com/nvidia/nemotron-3.5-bolt-e4b"},
+ {id:"minimaxai/minimax-m3.1-flash",name:"MiniMax M3.1 Flash",updated:"20 days ago",context:"262K",input:"Text + Image + Video",tags:"Coding · Agentic",url:"https://build.nvidia.com/minimaxai/minimax-m3.1-flash"},
+ {id:"nvidia/nemotron-3.5-super-vl-120b-a12b",name:"Nemotron 3.5 Super VL 120B",updated:"25 days ago",context:"262K",input:"Text + Image + Video",tags:"Reasoning · Vision · Tools",url:"https://build.nvidia.com/nvidia/nemotron-3.5-super-vl-120b-a12b"},
+ {id:"stepfun-ai/step-5-preview",name:"Step 5 Preview",updated:"25 days ago",context:"1M",input:"Text + Image",tags:"Reasoning · Tools",url:"https://build.nvidia.com/stepfun-ai/step-5-preview"},
+ {id:"z-ai/glm-5.3-flash",name:"GLM 5.3 Flash",updated:"1 month ago",context:"1M",input:"Text + Image",tags:"Fast · Reasoning · Tools",url:"https://build.nvidia.com/z-ai/glm-5-3-flash"},
+ {id:"deepseek-ai/deepseek-v4.1-flash",name:"DeepSeek V4.1 Flash",updated:"1 month ago",context:"1M",input:"Text + Image",tags:"Fast · Multimodal",url:"https://build.nvidia.com/deepseek-ai/deepseek-v4.1-flash"},
+ {id:"nvidia/nemotron-3.5-lightning-30b-a3b",name:"Nemotron 3.5 Lightning 30B",updated:"3 months ago",context:"1M",input:"Text",tags:"Coding · Agentic",url:"https://build.nvidia.com/nvidia/nemotron-3.5-lightning-30b-a3b"},
+ {id:"meta/muse-glimmer-30b",name:"Muse Glimmer 30B",updated:"3 months ago",context:"131K",input:"Text + Image",tags:"Reasoning · Vision · Tools",url:"https://build.nvidia.com/meta/muse-glimmer-30b"},
+ {id:"poolside/laguna-xs-2.1",name:"Laguna XS 2.1",updated:"3 months ago",context:"262K",input:"Text",tags:"Coding · Agentic",url:"https://build.nvidia.com/poolside/laguna-xs-2.1"},
+ {id:"google/diffusiongemma-26b-a4b-it",name:"DiffusionGemma 26B",updated:"5 months ago",context:"262K",input:"Text + Image + Video",tags:"Fast generation · Reasoning",url:"https://build.nvidia.com/google/diffusiongemma-26b-a4b-it"},
+ {id:"nvidia/nemotron-3-ultra-550b-a55b",name:"Nemotron 3 Ultra 550B",updated:"5 months ago",context:"1M",input:"Text",tags:"Frontier · Coding · Agentic · Tools",url:"https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b"}
+];
+const NVIDIA_FREE_MODEL_IDS=new Set(NVIDIA_FREE_CHAT_MODELS.map(model=>model.id));
 function providerHost(p){try{return new URL(p.baseUrl).hostname.toLowerCase()}catch{return""}}
 function hasZeroPricing(row){const pricing=row?.pricing;if(!pricing||typeof pricing!=="object")return false;const vals=["prompt","completion","input","output"].map(k=>pricing[k]).filter(v=>v!==undefined);return vals.length>=2&&vals.every(v=>Number(v)===0)}
-function isVerifiedFreeModel(p,row){const id=String(row?.id||row?.name||"").replace(/^models\//,""),host=providerHost(p);if(host==="generativelanguage.googleapis.com"||host.endsWith(".googleapis.com"))return GEMINI_FREE_MODELS.has(id);if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return id.endsWith(":free")||hasZeroPricing(row);return hasZeroPricing(row)}
-function isStoredFreeModel(p,id){const host=providerHost(p),model=String(id||"").replace(/^models\//,"");if(host==="generativelanguage.googleapis.com"||host.endsWith(".googleapis.com"))return GEMINI_FREE_MODELS.has(model);if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return model.endsWith(":free");return p.freeModelSource===host&&(p.models||[]).includes(model)}
-async function discover(p){const d=await api(p,"/models"),rows=d.data||d.models||[];return rows.filter(x=>isVerifiedFreeModel(p,x)).map(x=>String(x.id||x.name||"").replace(/^models\//,"")).filter(Boolean)}
+function isVerifiedFreeModel(p,row){const id=String(row?.id||row?.name||"").replace(/^models\//,""),host=providerHost(p);if(host==="integrate.api.nvidia.com")return NVIDIA_FREE_MODEL_IDS.has(id);if(host==="generativelanguage.googleapis.com"||host.endsWith(".googleapis.com"))return GEMINI_FREE_MODELS.has(id);if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return id.endsWith(":free")||hasZeroPricing(row);return hasZeroPricing(row)}
+function isStoredFreeModel(p,id){const host=providerHost(p),model=String(id||"").replace(/^models\//,"");if(host==="integrate.api.nvidia.com")return NVIDIA_FREE_MODEL_IDS.has(model);if(host==="generativelanguage.googleapis.com"||host.endsWith(".googleapis.com"))return GEMINI_FREE_MODELS.has(model);if(host==="openrouter.ai"||host.endsWith(".openrouter.ai"))return model.endsWith(":free");return p.freeModelSource===host&&(p.models||[]).includes(model)}
+async function discover(p){if(providerHost(p)==="integrate.api.nvidia.com"){await api(p,"/models");return NVIDIA_FREE_CHAT_MODELS.map(model=>model.id)}const d=await api(p,"/models"),rows=d.data||d.models||[];return rows.filter(x=>isVerifiedFreeModel(p,x)).map(x=>String(x.id||x.name||"").replace(/^models\//,"")).filter(Boolean)}
 function filterSavedFreeModels(){
  providers=providers.map(p=>{
   const host=providerHost(p);
@@ -172,7 +212,8 @@ async function connectGitHubMcp(){
 }
 function buildAgentTools(){
  const remote=Object.entries(githubMcpToolMap).map(([fn,tool])=>({type:"function",function:{name:fn,description:String(tool.description||tool.title||tool.name).slice(0,900),parameters:tool.inputSchema||{type:"object",properties:{}}}}));
- return tools.concat(remote);
+ const remoteCustom=Object.entries(remoteMcpToolMap).map(([fn,tool])=>({type:"function",function:{name:fn,description:String(tool.description||tool.title||tool.name).slice(0,900),parameters:tool.inputSchema||{type:"object",properties:{}}}}));
+ return tools.concat(remote,remoteCustom);
 }
 async function callGithubMcpTool(functionName,args){
  const tool=githubMcpToolMap[functionName];if(!tool)throw new Error("GitHub MCP tool is unavailable. Reconnect GitHub MCP.");
@@ -184,6 +225,56 @@ async function callGithubMcpTool(functionName,args){
  const data=await githubMcpRequest({jsonrpc:"2.0",id:Math.floor(Date.now()%1000000000)+10,method:"tools/call",params:{name:tool.name,arguments:args||{}}});
  if(data.response?.error)throw new Error(data.response.error.message||"GitHub MCP tool failed.");
  const result=data.response?.result||{},pieces=(result.content||[]).filter(x=>x.type==="text").map(x=>x.text||"");
+ return (pieces.join("\n")||JSON.stringify(result.structuredContent||result)).slice(0,24000);
+}
+
+function saveRemoteMcpConfig(){write(KEYS.remoteMcp,remoteMcpConfig);renderRemoteMcpStatus()}
+function renderRemoteMcpStatus(){
+ const name=$("#remoteMcpName"),url=$("#remoteMcpUrl"),token=$("#remoteMcpToken"),readOnly=$("#remoteMcpReadOnly"),status=$("#remoteMcpStatus");
+ if(name&&document.activeElement!==name)name.value=remoteMcpConfig.name||"";
+ if(url&&document.activeElement!==url)url.value=remoteMcpConfig.url||"";
+ if(token&&document.activeElement!==token)token.value=remoteMcpConfig.token||"";
+ if(readOnly)readOnly.checked=remoteMcpConfig.readOnly!==false;
+ if(status)status.textContent=remoteMcpConfig.connected?(remoteMcpTools.length+" tools connected · "+(remoteMcpConfig.readOnly?"read-only":"writes require confirmation")):"Not connected. Enter a remote HTTPS MCP endpoint and connect.";
+}
+async function remoteMcpRequest(message){
+ const response=await fetch("/api/mcp/remote",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:remoteMcpConfig.url,token:remoteMcpConfig.token||"",session_id:remoteMcpConfig.sessionId||"",read_only:remoteMcpConfig.readOnly!==false,message})});
+ const raw=await response.text();let data={};try{data=raw?JSON.parse(raw):{}}catch{}
+ if(!response.ok||data.ok===false)throw new Error(data.error||("Remote MCP returned HTTP "+response.status));
+ if(data.session_id)remoteMcpConfig.sessionId=data.session_id;return data;
+}
+function saveRemoteMcpSettings(){
+ remoteMcpConfig={name:$("#remoteMcpName").value.trim()||"Remote MCP",url:$("#remoteMcpUrl").value.trim(),token:$("#remoteMcpToken").value.trim(),readOnly:$("#remoteMcpReadOnly").checked,sessionId:"",connected:false};
+ remoteMcpTools=[];remoteMcpToolMap={};saveRemoteMcpConfig();toast("Remote MCP settings saved. Connect to apply.");
+}
+async function connectRemoteMcp(){
+ const url=$("#remoteMcpUrl")?.value.trim()||remoteMcpConfig.url||"";
+ const name=$("#remoteMcpName")?.value.trim()||remoteMcpConfig.name||"Remote MCP";
+ const token=$("#remoteMcpToken")?.value.trim()??remoteMcpConfig.token??"";
+ if(!url){toast("Enter your MCP server HTTPS URL first.");return}
+ if(!/^https:\/\//i.test(url)){toast("Remote MCP servers must use HTTPS.");return}
+ remoteMcpConfig={name,url,token,readOnly:$("#remoteMcpReadOnly")?.checked!==false,sessionId:"",connected:false};
+ remoteMcpTools=[];remoteMcpToolMap={};saveRemoteMcpConfig();
+ try{
+  const init=await remoteMcpRequest({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2025-03-26",capabilities:{},clientInfo:{name:"Vibe Calling",version:"0.3.0"}}});
+  if(init.response?.error)throw new Error(init.response.error.message||"MCP initialization failed.");
+  await remoteMcpRequest({jsonrpc:"2.0",method:"notifications/initialized",params:{}});
+  const listed=await remoteMcpRequest({jsonrpc:"2.0",id:2,method:"tools/list",params:{}});
+  if(listed.response?.error)throw new Error(listed.response.error.message||"Could not list remote MCP tools.");
+  remoteMcpTools=(listed.response?.result?.tools||[]).slice(0,40);remoteMcpToolMap={};
+  remoteMcpTools.forEach((tool,index)=>{const safeServer=String(name).replace(/[^a-zA-Z0-9_]/g,"_").slice(0,10)||"server";const safeTool=String(tool.name||("tool_"+index)).replace(/[^a-zA-Z0-9_]/g,"_").slice(0,38);remoteMcpToolMap["mcp_remote_"+safeServer+"_"+safeTool]=tool});
+  remoteMcpConfig.connected=true;saveRemoteMcpConfig();toast("Remote MCP connected · "+remoteMcpTools.length+" tools");
+ }catch(error){remoteMcpConfig.connected=false;saveRemoteMcpConfig();toast("Remote MCP connection failed: "+error.message)}
+}
+async function callRemoteMcpTool(functionName,args){
+ const tool=remoteMcpToolMap[functionName];if(!tool)throw new Error("Remote MCP tool is unavailable. Reconnect the server.");
+ if(tool.annotations?.readOnlyHint!==true){
+  if(remoteMcpConfig.readOnly)throw new Error("Remote MCP is read-only. Enable writes in Agent tools and reconnect.");
+  if(!confirm("The agent wants to run a remote MCP action that may change external data.\n\nServer: "+remoteMcpConfig.name+"\nTool: "+tool.name+"\n\nAllow this action?"))return "User declined this remote MCP write action.";
+ }
+ const data=await remoteMcpRequest({jsonrpc:"2.0",id:Math.floor(Date.now()%1000000000)+20,method:"tools/call",params:{name:tool.name,arguments:args||{}}});
+ if(data.response?.error)throw new Error(data.response.error.message||"Remote MCP tool failed.");
+ const result=data.response?.result||{},pieces=(result.content||[]).filter(item=>item.type==="text").map(item=>item.text||"");
  return (pieces.join("\n")||JSON.stringify(result.structuredContent||result)).slice(0,24000);
 }
 async function workspaceRequest(payload){
@@ -222,6 +313,7 @@ async function refreshWorkspacePanel(){
 }
 async function runTool(name,a){
  if(name.startsWith("mcp_github_"))return callGithubMcpTool(name,a);
+ if(name.startsWith("mcp_remote_"))return callRemoteMcpTool(name,a);
  if(name==="skill_list"){const data=await skillsRequest({action:"list"});return data.skills.map(sk=>sk.id+" · "+sk.name+" — "+sk.description).join("\n")||"No skills are installed."}
  if(name==="skill_read")return readSkill(a.id);
  if(name==="workspace_download_file"){const project=String(a.project||activeProject||""),filePath=String(a.path||"");if(!project||!filePath)throw Error("Project and file path are required.");const url="/api/download/"+encodeURIComponent(project)+"/"+filePath.split("/").map(encodeURIComponent).join("/");return "The file is ready for download: ["+filePath.split("/").pop()+"]("+url+")"}
@@ -333,6 +425,9 @@ if(b.id==="testProvider"){testProvider();return}
 if(b.id==="createProjectBtn"){(async()=>{const input=$("#projectNameInput"),name=input.value.trim();if(!name){toast("Enter a project name first.");return}try{const data=await workspaceRequest({action:"create_project",name});setActiveProject(data.project);input.value="";await refreshWorkspacePanel();toast("Project created: "+data.project)}catch(error){toast(error.message)}})();return}
 if(b.id==="refreshWorkspaceBtn"){refreshWorkspacePanel();return}
 if(b.id==="connectGithubMcp"){connectGitHubMcp();return}
+if(b.dataset.addNvidiaModel){chooseNvidiaModel(b.dataset.addNvidiaModel);return}
+if(b.id==="saveRemoteMcpSettings"){saveRemoteMcpSettings();return}
+if(b.id==="connectRemoteMcp"){connectRemoteMcp();return}
 if(b.id==="saveMcpSettings"){mcpConfig.token=$("#githubPatInput").value.trim();mcpConfig.readOnly=$("#githubReadOnly").checked;mcpConfig.connected=false;mcpConfig.sessionId="";githubMcpTools=[];githubMcpToolMap={};saveMcpConfig();toast("GitHub MCP settings saved. Reconnect to apply.");return}
 if(b.id==="uploadSkillBtn"){$("#skillFileInput").click();return}
 if(b.dataset.skillRead){readSkill(b.dataset.skillRead).then(content=>{const w=window.open("","_blank");if(w){const pre=w.document.createElement("pre");pre.textContent=content;pre.style.cssText="white-space:pre-wrap;font:14px/1.6 monospace;padding:24px";w.document.body.appendChild(pre)}else toast("Pop-up blocked")}).catch(error=>toast(error.message));return}
@@ -340,7 +435,7 @@ if(b.dataset.removeAttachment!==undefined){pendingAttachments.splice(Number(b.da
 if(b.id==="previewProjectBtn"){(async()=>{const tab=window.open("about:blank","_blank");try{if(!activeProject)throw Error("Select a project first.");const data=await workspaceRequest({action:"preview",project:activeProject});if(tab)tab.location=data.url;else toast(data.url)}catch(error){if(tab)tab.close();toast(error.message)}})();return}
 if(b.id==="clearHistory"){if(confirm("Clear all conversations?")){chats=[];chatId=null;saveChats();renderChat()}return}
 if(b.id==="clearAll"){$("#confirmDialog").showModal();return}
-if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));providers=[];chats=[];notes=[];chatId=null;$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
+if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));providers=[];chats=[];notes=[];chatId=null;remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};remoteMcpTools=[];remoteMcpToolMap={};$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
 if(b.id==="chatOptions"){toast("More options coming soon.");return}
 if(b.dataset.view){setView(b.dataset.view);return}
 if(b.dataset.close){$("#"+b.dataset.close)?.close();return}
@@ -383,7 +478,7 @@ $("#messageInput").addEventListener("input",e=>{e.target.style.height="auto";e.t
 $("#agentToggle").addEventListener("change",e=>{$("#toolState").textContent=e.target.checked?"on":"off"});
 $("#projectSelect").addEventListener("change",e=>{setActiveProject(e.target.value);refreshWorkspacePanel()});
 $("#skillFileInput").addEventListener("change",async e=>{for(const file of [...e.target.files])await installSkillFile(file);e.target.value=""});
-function init(){try{filterSavedFreeModels();renderProviders();renderModels();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();console.info("Vibe Calling initialized");if(mcpConfig.connected&&mcpConfig.token)connectGitHubMcp()}catch(e){fatal(e.stack||e.message||String(e))}}
+function init(){try{filterSavedFreeModels();renderProviders();renderModels();renderNvidiaCatalog();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();renderRemoteMcpStatus();console.info("Vibe Calling initialized");if(mcpConfig.connected&&mcpConfig.token)connectGitHubMcp();if(remoteMcpConfig.connected&&remoteMcpConfig.url)connectRemoteMcp()}catch(e){fatal(e.stack||e.message||String(e))}}
 init();
 window.__vibeAppReady = true;
 document.documentElement.dataset.vibeApp = 'ready';
