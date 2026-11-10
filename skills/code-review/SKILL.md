@@ -1,5 +1,5 @@
 ---
-name: code-review
+name: Code Review
 description: Review the complete change for correctness, regressions, architecture, security, performance, accessibility, and test quality before release.
 ---
 
