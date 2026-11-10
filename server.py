@@ -306,10 +306,19 @@ class DuckDuckGoResultParser(HTMLParser):
         self._buffer = []
         self._current = None
 
+    def _finish_current(self):
+        if self._current and self._current.get("title") and self._current.get("url"):
+            self.results.append(self._current)
+        self._current = None
+        self._active = None
+        self._active_tag = None
+        self._buffer = []
+
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
         classes = set((attributes.get("class") or "").split())
         if tag == "a" and "result__a" in classes:
+            self._finish_current()
             self._current = {"title": "", "url": attributes.get("href", ""), "snippet": ""}
             self._active = "title"
             self._active_tag = tag
@@ -334,12 +343,11 @@ class DuckDuckGoResultParser(HTMLParser):
             self._active_tag = None
             self._buffer = []
         else:
-            self._active = None
-            self._active_tag = None
-            self._buffer = []
-            if self._current and self._current.get("title") and self._current.get("url"):
-                self.results.append(self._current)
-                self._current = None
+            self._finish_current()
+
+    def close(self):
+        super().close()
+        self._finish_current()
 
 
 class ResearchPageParser(HTMLParser):
@@ -1004,6 +1012,7 @@ class Handler(SimpleHTTPRequestHandler):
                 raise ValueError("Could not reach the web search provider: " + str(exc.reason))
             parser = DuckDuckGoResultParser()
             parser.feed(raw.decode(charset, errors="replace"))
+            parser.close()
             results = []
             seen = set()
             for item in parser.results:
