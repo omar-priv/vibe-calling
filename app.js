@@ -1041,9 +1041,10 @@ $("#fileInput").addEventListener("change",async e=>{await uploadChatFiles(e.targ
 $("#messageInput").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("#chatForm").requestSubmit()}});
 $("#messageInput").addEventListener("input",e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,180)+"px"});
 $("#agentToggle").addEventListener("change",e=>{$("#toolState").textContent=e.target.checked?"on":"off"});
+$("#researchMode").addEventListener("change",e=>{researchMode=["off","web","deep"].includes(e.target.value)?e.target.value:"off";write(KEYS.researchMode,researchMode);toast(researchMode==="deep"?"Deep Research selected":researchMode==="web"?"Web Research selected":"Research mode off")});
 $("#projectSelect").addEventListener("change",e=>{setActiveProject(e.target.value);refreshWorkspacePanel()});
 $("#skillFileInput").addEventListener("change",async e=>{for(const file of [...e.target.files])await installSkillFile(file);e.target.value=""});
-function init(){try{filterSavedFreeModels();renderProviders();renderModels();renderNvidiaCatalog();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();renderRemoteMcpStatus();console.info("Vibe Calling initialized");if(mcpConfig.connected&&mcpConfig.token)connectGitHubMcp();if(remoteMcpConfig.connected&&remoteMcpConfig.url)connectRemoteMcp()}catch(e){fatal(e.stack||e.message||String(e))}}
+function init(){try{filterSavedFreeModels();$("#researchMode").value=researchMode;renderProviders();renderModels();renderNvidiaCatalog();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();renderRemoteMcpStatus();console.info("Vibe Calling initialized");if(mcpConfig.connected&&mcpConfig.token)connectGitHubMcp();if(remoteMcpConfig.connected&&remoteMcpConfig.url)connectRemoteMcp()}catch(e){fatal(e.stack||e.message||String(e))}}
 init();
 window.__vibeAppReady = true;
 document.documentElement.dataset.vibeApp = 'ready';
