@@ -386,7 +386,12 @@ async function callGithubMcpTool(functionName,args){
  }
  const data=await githubMcpRequest({jsonrpc:"2.0",id:Math.floor(Date.now()%1000000000)+10,method:"tools/call",params:{name:tool.name,arguments:args||{}}});
  if(data.response?.error)throw new Error(data.response.error.message||"GitHub MCP tool failed.");
- const result=data.response?.result||{},pieces=(result.content||[]).filter(x=>x.type==="text").map(x=>x.text||"");
+ const result=data.response?.result||{};
+ if(result.isError===true){
+  const detail=(result.content||[]).filter(item=>item.type==="text").map(item=>item.text||"").join("\n");
+  throw new Error(detail||"GitHub MCP tool reported an execution error.");
+ }
+ const pieces=(result.content||[]).filter(item=>item.type==="text").map(item=>item.text||"");
  return (pieces.join("\n")||JSON.stringify(result.structuredContent||result)).slice(0,24000);
 }
 
@@ -451,7 +456,12 @@ async function callRemoteMcpTool(functionName,args){
  }
  const data=await remoteMcpRequest({jsonrpc:"2.0",id:Math.floor(Date.now()%1000000000)+20,method:"tools/call",params:{name:tool.name,arguments:args||{}}});
  if(data.response?.error)throw new Error(data.response.error.message||"Remote MCP tool failed.");
- const result=data.response?.result||{},pieces=(result.content||[]).filter(item=>item.type==="text").map(item=>item.text||"");
+ const result=data.response?.result||{};
+ if(result.isError===true){
+  const detail=(result.content||[]).filter(item=>item.type==="text").map(item=>item.text||"").join("\n");
+  throw new Error(detail||"Remote MCP tool reported an execution error.");
+ }
+ const pieces=(result.content||[]).filter(item=>item.type==="text").map(item=>item.text||"");
  return (pieces.join("\n")||JSON.stringify(result.structuredContent||result)).slice(0,24000);
 }
 async function workspaceRequest(payload){
