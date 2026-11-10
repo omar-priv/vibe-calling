@@ -418,15 +418,30 @@ async function connectRemoteMcp(){
  remoteMcpConfig={name,url,token,readOnly:$("#remoteMcpReadOnly")?.checked!==false,sessionId:"",connected:false};
  remoteMcpTools=[];remoteMcpToolMap={};saveRemoteMcpConfig();
  try{
-  const init=await remoteMcpRequest({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2025-03-26",capabilities:{},clientInfo:{name:"Vibe Calling",version:"0.3.0"}}});
+  const init=await remoteMcpRequest({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2025-03-26",capabilities:{},clientInfo:{name:"Vibe Calling",version:"0.4.0"}}});
   if(init.response?.error)throw new Error(init.response.error.message||"MCP initialization failed.");
+  if(!init.response?.result?.serverInfo)throw new Error("Remote MCP server did not return a valid initialization response.");
   await remoteMcpRequest({jsonrpc:"2.0",method:"notifications/initialized",params:{}});
-  const listed=await remoteMcpRequest({jsonrpc:"2.0",id:2,method:"tools/list",params:{}});
-  if(listed.response?.error)throw new Error(listed.response.error.message||"Could not list remote MCP tools.");
-  remoteMcpTools=(listed.response?.result?.tools||[]).slice(0,40);remoteMcpToolMap={};
-  remoteMcpTools.forEach((tool,index)=>{const safeServer=String(name).replace(/[^a-zA-Z0-9_]/g,"_").slice(0,10)||"server";const safeTool=String(tool.name||("tool_"+index)).replace(/[^a-zA-Z0-9_]/g,"_").slice(0,38);remoteMcpToolMap["mcp_remote_"+safeServer+"_"+safeTool]=tool});
-  remoteMcpConfig.connected=true;saveRemoteMcpConfig();toast("Remote MCP connected · "+remoteMcpTools.length+" tools");
- }catch(error){remoteMcpConfig.connected=false;saveRemoteMcpConfig();toast("Remote MCP connection failed: "+error.message)}
+  let cursor="",allTools=[];
+  for(let page=0;page<5&&allTools.length<100;page++){
+   const listed=await remoteMcpRequest({jsonrpc:"2.0",id:2+page,method:"tools/list",params:cursor?{cursor}:{}});
+   if(listed.response?.error)throw new Error(listed.response.error.message||"Could not list remote MCP tools.");
+   const result=listed.response?.result;
+   if(!result||!Array.isArray(result.tools))throw new Error("Remote MCP returned an invalid tools/list response.");
+   allTools.push(...result.tools);cursor=result.nextCursor||"";
+   if(!cursor)break;
+  }
+  remoteMcpTools=allTools.slice(0,100);remoteMcpToolMap={};
+  remoteMcpTools.forEach((tool,index)=>{
+   const safeServer=String(name).replace(/[^a-zA-Z0-9_]/g,"_").slice(0,10)||"server";
+   const safeTool=String(tool.name||"tool").replace(/[^a-zA-Z0-9_]/g,"_").slice(0,30)||"tool";
+   remoteMcpToolMap["mcp_remote_"+safeServer+"_"+safeTool+"_"+index]=tool;
+  });
+  if(!remoteMcpTools.length)throw new Error("Remote MCP server returned zero tools.");
+  remoteMcpConfig.connected=true;saveRemoteMcpConfig();toast("Remote MCP verified · "+remoteMcpTools.length+" tools available");
+ }catch(error){
+  remoteMcpConfig.connected=false;remoteMcpTools=[];remoteMcpToolMap={};saveRemoteMcpConfig();toast("Remote MCP verification failed: "+error.message);
+ }
 }
 async function callRemoteMcpTool(functionName,args){
  const tool=remoteMcpToolMap[functionName];if(!tool)throw new Error("Remote MCP tool is unavailable. Reconnect the server.");
