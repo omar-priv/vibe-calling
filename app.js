@@ -38,7 +38,10 @@ function setView(name){$$(".view").forEach(x=>x.classList.remove("active"));$("#
 function saveChats(){write(KEYS.chats,chats);renderHistory()}
 function saveProviders(){write(KEYS.providers,providers);renderProviders();renderModels()}
 function newChat(){const c={id:uid(),title:"New conversation",messages:[],createdAt:Date.now()};chats.unshift(c);chatId=c.id;saveChats();renderChat();setView("chat")}
-function renderHistory(){const el=$("#historyList");el.innerHTML=chats.slice(0,50).map(c=>'<button type="button" class="history-item '+(c.id===chatId?"active":"")+'" data-chat="'+esc(c.id)+'">'+esc(c.title||"Conversation")+'</button>').join("")}
+function renderHistory(){
+ const el=$("#historyList");
+ el.innerHTML=chats.slice(0,50).map(c=>'<div class="history-entry"><button type="button" class="history-item '+(c.id===chatId?"active":"")+'" data-chat="'+esc(c.id)+'" title="'+esc(c.title||"Conversation")+'">'+esc(c.title||"Conversation")+'</button><button type="button" class="history-delete" data-delete-chat="'+esc(c.id)+'" aria-label="Delete conversation: '+esc(c.title||"Conversation")+'" title="Delete this chat">×</button></div>').join("");
+}
 function renderModels(preferred){
  const el=$("#modelSelect"),old=preferred||el.value,opts=[];
  providers.forEach(p=>{
