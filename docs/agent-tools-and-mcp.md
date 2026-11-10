@@ -15,7 +15,7 @@ Built-in skills are stored in `skills/<skill-name>/SKILL.md`. They are immediate
 - security-review
 - github-management
 
-Agent mode receives the skill catalog and can call `skill_list` and `skill_read` to load the relevant instruction files before design or implementation. Skills are task instructions and reference material, not model fine-tuning.
+Agent mode receives the skill catalog and can call `skill_list` and `skill_read` to load the relevant instruction files before design or implementation. The catalog now includes focused debugging, code-review, frontend-design, UX-review, web-research, and deep-research instructions. Skills are task instructions and reference material, not model fine-tuning.
 
 ### Import a custom skill
 
@@ -41,6 +41,8 @@ description: Research a topic using primary sources and verify claims.
 3. State uncertainty and cite evidence.
 ```
 
+The complete built-in catalog also includes visual-reference-research, UX-review, accessibility-review, performance-engineering, API integration, MCP server integration, browser visual testing, release engineering, web-research, and deep-research. See docs/skills.md for the 20-skill list and docs/skills-reviewed.md for the public references inspected when strengthening the local debugging, review, and design guidance.
+
 ## Chat attachments and generated files
 
 The chat composer accepts up to 3 files per message, at most 2 MB per file and 4 MB total. Supported file types are common text/code formats and PNG/JPG/WEBP/GIF images. Text files are inserted into the message context; images are passed as image inputs, so the selected model must support vision. PDF, DOCX, audio, video, and archive attachments are not yet supported.
@@ -65,7 +67,7 @@ The Python server binds only to `127.0.0.1`. Approved project scripts and comman
 
 ## What is MCP?
 
-MCP stands for **Model Context Protocol**. It is a standard way for an AI host to connect to external tool providers. An MCP server can expose tools, resources, and prompt templates. The host discovers the tools and their input schemas, then lets the model choose a tool call. MCP is a connector protocol, not a model or an autonomous agent by itself.
+MCP stands for **Model Context Protocol**. It is a standard way for an AI host to connect to external tool providers. An MCP server can expose tools, resources, and prompt templates. The host discovers the tools and their input schemas, then lets the model choose a tool call. Vibe Calling validates the initialize response, follows paginated tools/list cursors, and propagates tool-level isError results back to Agent mode. MCP is a connector protocol, not a model or an autonomous agent by itself.
 
 ## GitHub MCP inside Vibe Calling
 
@@ -83,7 +85,7 @@ Vibe Calling includes an in-app client for the official hosted GitHub MCP endpoi
 2. Create a fine-grained GitHub token scoped only to the repositories you want the agent to access.
 3. Paste it into the token field.
 4. Leave **Read-only mode** checked and choose **Connect GitHub**.
-5. Once the MCP tool list is loaded, enable Agent mode in Chat and ask it to inspect one of your repositories.
+5. After the verification message reports that tools are available, enable Agent mode in Chat and ask it to inspect one of your repositories.
 
 The token is stored in browser local storage so the connection can persist after reload. It is not encrypted by this app. Avoid shared browser profiles; do not send the token in chat or commit it to source control.
 
@@ -107,6 +109,22 @@ The repository also keeps `.vscode/mcp.json` as an optional, read-only configura
 ## Remote browser / computer use
 
 The UI contains a clearly marked planned Beta panel for a server-hosted browser. It is not connected in this release. A real implementation needs disposable isolated browser sessions, strict network and file boundaries, resource limits, screenshots, action APIs, session expiry, and cleanup. It must not control the user's personal computer or share browser state across sessions.
+
+## Web Research and Deep Research
+
+The chat composer contains a Research selector with three modes:
+
+- **Off**: normal chat or Agent behavior is unchanged.
+- **Web Research**: quick lookup. The model normally performs one focused search (up to five results) and opens the best one or two sources when details need verification. Use this for straightforward questions and current news.
+- **Deep Research**: a multi-stage investigation. The model breaks the question into sub-questions, runs at least three distinct searches, opens at least four useful sources when accessible, prioritizes primary sources, cross-checks independent evidence, separates publication dates from event dates, and synthesizes a cited report.
+
+Both research modes use the selected provider/model and the same local agent streaming/runtime loop. Research mode exposes only the dedicated web_search and web_open tools; project editing and MCP tools are not offered in that session. Answers can cite sources using Markdown HTTPS links, which open in a new browser tab.
+
+### Search backend and boundaries
+
+The local Python server queries DuckDuckGo's public HTML search page; no paid search API key is required. Search may be rate-limited, blocked, incomplete, or temporarily unavailable. Search snippets are leads, not evidence: the model should open useful results before relying on detailed claims. Deep Research consumes more provider tokens and requests than Web Research; the model's context window, provider quota, and rate limits still apply.
+
+The local research reader accepts HTTPS URLs only, resolves hosts before connecting, rejects localhost/private/non-public IPs, validates redirects, limits page reads to 1 MB, and extracts text rather than executing page scripts. It supports HTML and common text/JSON/XML content types. It is not a full browser: JavaScript-only pages, paywalls, CAPTCHAs, and some anti-bot responses may not provide readable content. The research engine must disclose missing sources and must never invent citations or dates. Page content is untrusted data, not instructions.
 
 ## References
 
@@ -133,7 +151,7 @@ This connector targets **remote Streamable HTTP**. A local MCP server that requi
 
 ## Agent execution, long-running tasks, continuation, project runtime, and memory
 
-Agent mode preloads up to three relevant built-in skills for the current request. Skill IDs are instructions, not function calls: the agent reads them with skill_read({id}). If a model mistakenly emits a built-in skill ID as a tool name, the client resolves it by reading that skill instead of treating it as an unknown tool.
+Agent mode preloads up to four relevant built-in skills for the current request, allowing design, UX, and frontend implementation guidance to be combined when needed. Skill IDs are instructions, not function calls: the agent reads them with skill_read({id}). If a model mistakenly emits a built-in skill ID as a tool name, the client resolves it by reading that skill instead of treating it as an unknown tool.
 
 Long-running tasks are no longer stopped after 24 model turns. The Agent automatically saves a checkpoint every 500 model turns and every 2,000 tool calls, then extends its working budget and continues without asking the user to press Continue. These are rolling checkpoint intervals, not a total task limit or a claim of completion. The Agent still pauses for a detected tool loop, repeated empty model responses, a real provider/local error, Stop, or a task-specific safety blocker. The saved checkpoint lets the user resume after those interruptions.
 
