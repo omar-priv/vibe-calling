@@ -8,6 +8,7 @@ import binascii
 import ipaddress
 import io
 import json
+from html.parser import HTMLParser
 import mimetypes
 import os
 import re
@@ -24,7 +25,7 @@ import uuid
 import urllib.error
 import urllib.request
 import zipfile
-from urllib.parse import unquote, quote
+from urllib.parse import unquote, quote, urlencode, urljoin, parse_qs
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -250,6 +251,177 @@ def validate_target(base_url):
     path = parts.path.rstrip("/")
     path = re.sub(r"/(models|chat/completions)$", "", path, flags=re.I)
     return parts, host, port, path
+
+
+MAX_RESEARCH_RESULTS = 8
+MAX_RESEARCH_PAGE_BYTES = 1024 * 1024
+RESEARCH_USER_AGENT = "Mozilla/5.0 (compatible; VibeCallingResearch/1.0; +https://github.com/omar-priv/vibe-calling)"
+
+
+def validate_research_url(url):
+    """Allow public HTTPS pages only; keep research fetching out of private networks."""
+    if not isinstance(url, str) or not url.strip() or len(url) > 4096:
+        raise ValueError("A valid HTTPS source URL is required.")
+    parts = urlsplit(url.strip())
+    host = (parts.hostname or "").rstrip(".").lower()
+    if parts.scheme.lower() != "https" or not host or parts.username or parts.password:
+        raise ValueError("Research can open HTTPS URLs only; embedded credentials are blocked.")
+    if host in {"localhost", "localhost.localdomain"} or host.endswith((".localhost", ".local", ".internal", ".home", ".lan")):
+        raise ValueError("Local and private network addresses are blocked for web research.")
+    try:
+        port = parts.port or 443
+    except ValueError:
+        raise ValueError("Invalid port in research URL.")
+    try:
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError("Could not resolve the research source hostname: " + str(exc))
+    if not addresses:
+        raise ValueError("The research source hostname did not resolve.")
+    for item in addresses:
+        ip = ipaddress.ip_address(item[4][0].split("%", 1)[0])
+        if not ip.is_global:
+            raise ValueError("Research source resolves to a private or non-public IP address; blocked.")
+    return parts
+
+
+class ResearchRedirectHandler(urllib.request.HTTPRedirectHandler):
+    max_redirections = 4
+    max_repeats = 2
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        validate_research_url(urljoin(req.full_url, newurl))
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+RESEARCH_OPENER = urllib.request.build_opener(ResearchRedirectHandler())
+
+
+class DuckDuckGoResultParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.results = []
+        self._active = None
+        self._active_tag = None
+        self._buffer = []
+        self._current = None
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        classes = set((attributes.get("class") or "").split())
+        if tag == "a" and "result__a" in classes:
+            self._current = {"title": "", "url": attributes.get("href", ""), "snippet": ""}
+            self._active = "title"
+            self._active_tag = tag
+            self._buffer = []
+        elif "result__snippet" in classes and self._current is not None:
+            self._active = "snippet"
+            self._active_tag = tag
+            self._buffer = []
+
+    def handle_data(self, data):
+        if self._active:
+            self._buffer.append(data)
+
+    def handle_endtag(self, tag):
+        if not self._active or tag != self._active_tag:
+            return
+        value = " ".join(" ".join(self._buffer).split())
+        if self._current is not None:
+            self._current[self._active] = value
+        if self._active == "title":
+            self._active = None
+            self._active_tag = None
+            self._buffer = []
+        else:
+            self._active = None
+            self._active_tag = None
+            self._buffer = []
+            if self._current and self._current.get("title") and self._current.get("url"):
+                self.results.append(self._current)
+                self._current = None
+
+
+class ResearchPageParser(HTMLParser):
+    BLOCKED_TAGS = {"script", "style", "noscript", "svg", "form", "nav", "footer", "header", "aside"}
+    BLOCK_TAGS = {"p", "div", "article", "main", "section", "h1", "h2", "h3", "h4", "li", "blockquote", "pre", "br"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.title_parts = []
+        self.text_parts = []
+        self._in_title = False
+        self._skip_depth = 0
+        self._skip_stack = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in self.BLOCKED_TAGS:
+            self._skip_depth += 1
+            self._skip_stack.append(tag)
+            return
+        if self._skip_depth:
+            return
+        if tag == "title":
+            self._in_title = True
+        if tag in self.BLOCK_TAGS:
+            self.text_parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if self._skip_depth:
+            if tag in self._skip_stack:
+                reverse_index = len(self._skip_stack) - 1 - self._skip_stack[::-1].index(tag)
+                self._skip_stack = self._skip_stack[:reverse_index]
+                self._skip_depth = len(self._skip_stack)
+            return
+        if tag == "title":
+            self._in_title = False
+        if tag in self.BLOCK_TAGS:
+            self.text_parts.append("\n")
+
+    def handle_data(self, data):
+        if self._skip_depth:
+            return
+        cleaned = " ".join(data.split())
+        if not cleaned:
+            return
+        if self._in_title:
+            self.title_parts.append(cleaned)
+        else:
+            self.text_parts.append(cleaned)
+
+
+def normalize_research_result_url(href):
+    candidate = urljoin("https://html.duckduckgo.com/", href or "")
+    parts = urlsplit(candidate)
+    if "duckduckgo.com" in (parts.hostname or "").lower():
+        wrapped = parse_qs(parts.query).get("uddg", [])
+        if wrapped:
+            candidate = unquote(wrapped[0])
+    parts = urlsplit(candidate)
+    if parts.scheme.lower() != "https" or not parts.hostname:
+        return ""
+    return candidate
+
+
+def extract_research_page(raw, content_type):
+    lower_type = (content_type or "").lower()
+    if not any(kind in lower_type for kind in ("text/html", "application/xhtml+xml", "text/plain", "application/json", "text/xml")):
+        raise ValueError("This source does not return a supported text or HTML page.")
+    charset = "utf-8"
+    match = re.search(r"charset=([A-Za-z0-9._-]+)", content_type or "", flags=re.I)
+    if match:
+        charset = match.group(1)
+    try:
+        decoded = raw.decode(charset, errors="replace")
+    except LookupError:
+        decoded = raw.decode("utf-8", errors="replace")
+    if "html" not in lower_type and "xhtml" not in lower_type:
+        return "", " ".join(decoded.split())[:24000]
+    parser = ResearchPageParser()
+    parser.feed(decoded)
+    title = " ".join(parser.title_parts).strip()[:300]
+    text = " ".join(" ".join(parser.text_parts).split())
+    return title, text[:24000]
 
 
 def validate_remote_mcp_payload(payload):
@@ -733,7 +905,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = urlsplit(self.path).path
-        if route not in {"/api/proxy", "/api/workspace", "/api/skills", "/api/mcp/github", "/api/mcp/remote"}:
+        if route not in {"/api/proxy", "/api/workspace", "/api/skills", "/api/mcp/github", "/api/mcp/remote", "/api/research"}:
             self.send_json(404, {"error": "Unknown local API route."})
             return
         host_header = (self.headers.get("Host") or "").lower()
@@ -764,8 +936,10 @@ class Handler(SimpleHTTPRequestHandler):
                 self.handle_skills(payload)
             elif route == "/api/mcp/github":
                 self.handle_github_mcp(payload)
-            else:
+            elif route == "/api/mcp/remote":
                 self.handle_remote_mcp(payload)
+            else:
+                self.handle_research(payload)
         except (UnicodeDecodeError, json.JSONDecodeError):
             self.send_json(400, {"error": "Request body must be valid JSON.", "code": "INVALID_JSON"})
         except ValueError as exc:
@@ -785,6 +959,111 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as exc:
             error_id = uuid.uuid4().hex[:10]
             self.send_json(500, {"error": "Unexpected failure in " + route + " (reference " + error_id + ").", "code": "INTERNAL_ERROR", "reference": error_id})
+
+    def handle_research(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid web research request.")
+        action = payload.get("action")
+        if action == "search":
+            query = payload.get("query", "")
+            if not isinstance(query, str) or not query.strip() or len(query) > 300:
+                raise ValueError("Enter a search query of 1–300 characters.")
+            requested = payload.get("max_results", 5)
+            if isinstance(requested, bool) or not isinstance(requested, int):
+                raise ValueError("max_results must be an integer.")
+            max_results = max(1, min(MAX_RESEARCH_RESULTS, requested))
+            time_range = payload.get("time_range", "any")
+            date_filters = {"day": "d", "week": "w", "month": "m", "year": "y", "any": ""}
+            if time_range not in date_filters:
+                raise ValueError("Unsupported research time range.")
+            params = {"q": query.strip(), "kl": "wt-wt"}
+            if date_filters[time_range]:
+                params["df"] = date_filters[time_range]
+            search_url = "https://html.duckduckgo.com/html/?" + urlencode(params)
+            validate_research_url(search_url)
+            request = urllib.request.Request(
+                search_url,
+                headers={
+                    "User-Agent": RESEARCH_USER_AGENT,
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Language": "en-US,en;q=0.8",
+                },
+                method="GET",
+            )
+            try:
+                with RESEARCH_OPENER.open(request, timeout=20) as response:
+                    raw = response.read(2 * 1024 * 1024 + 1)
+                    if len(raw) > 2 * 1024 * 1024:
+                        raise ValueError("Search response exceeded the 2 MB limit.")
+                    if response.status >= 400:
+                        raise ValueError("Search provider returned HTTP " + str(response.status) + ".")
+                    charset = response.headers.get_content_charset() or "utf-8"
+            except urllib.error.HTTPError as exc:
+                raise ValueError("Search provider returned HTTP " + str(exc.code) + ". Try again later.")
+            except urllib.error.URLError as exc:
+                raise ValueError("Could not reach the web search provider: " + str(exc.reason))
+            parser = DuckDuckGoResultParser()
+            parser.feed(raw.decode(charset, errors="replace"))
+            results = []
+            seen = set()
+            for item in parser.results:
+                url = normalize_research_result_url(item.get("url", ""))
+                if not url or url in seen:
+                    continue
+                seen.add(url)
+                results.append({
+                    "title": item.get("title", "")[:300],
+                    "url": url,
+                    "snippet": item.get("snippet", "")[:900],
+                })
+                if len(results) >= max_results:
+                    break
+            self.send_json(200, {
+                "ok": True,
+                "query": query.strip(),
+                "time_range": time_range,
+                "results": results,
+                "provider": "DuckDuckGo HTML",
+                "note": "Search results may be rate-limited or temporarily unavailable. Open sources to verify their full text and dates.",
+            })
+            return
+        if action == "open":
+            url = payload.get("url", "")
+            validate_research_url(url)
+            request = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": RESEARCH_USER_AGENT,
+                    "Accept": "text/html,application/xhtml+xml,text/plain,application/json",
+                },
+                method="GET",
+            )
+            try:
+                with RESEARCH_OPENER.open(request, timeout=25) as response:
+                    raw = response.read(MAX_RESEARCH_PAGE_BYTES + 1)
+                    if len(raw) > MAX_RESEARCH_PAGE_BYTES:
+                        raise ValueError("This page exceeds the 1 MB research read limit.")
+                    if response.status >= 400:
+                        raise ValueError("Source returned HTTP " + str(response.status) + ".")
+                    content_type = response.headers.get("Content-Type", "text/html")
+                    final_url = response.geturl()
+            except urllib.error.HTTPError as exc:
+                raise ValueError("Source returned HTTP " + str(exc.code) + ".")
+            except urllib.error.URLError as exc:
+                raise ValueError("Could not open research source: " + str(exc.reason))
+            validate_research_url(final_url)
+            title, content = extract_research_page(raw, content_type)
+            if not content:
+                raise ValueError("The source returned no readable page text.")
+            self.send_json(200, {
+                "ok": True,
+                "url": final_url,
+                "title": title or final_url,
+                "content": content,
+                "content_type": content_type,
+            })
+            return
+        raise ValueError("Unknown web research action.")
 
     def handle_skills(self, payload):
         if not isinstance(payload, dict):
