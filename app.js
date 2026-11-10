@@ -79,6 +79,8 @@ function markdown(s){
  x=x.replace(/^### (.*)$/gm,"<h3>$1</h3>").replace(/^## (.*)$/gm,"<h2>$1</h2>").replace(/^# (.*)$/gm,"<h1>$1</h1>").replace(/\*\*(.*?)\*\*/g,"<b>$1</b>");
  const downloadPattern=/\[([^\]]+)\]\((\/api\/download\/[^)\s]+)\)/g;
  x=x.replace(downloadPattern,'<a class="file-download" href="$2" download>$1</a>');
+ const externalLinkPattern=/\[([^\]]{1,180})\]\((https:\/\/[^\s)]+)\)/g;
+ x=x.replace(externalLinkPattern,'<a href="$2" target="_blank" rel="noopener noreferrer">$1 ↗</a>');
  return x.split(/\n{2,}/).map(p=>p.startsWith("<pre>")||p.startsWith("<h")?p:"<p>"+p.replace(/\n/g,"<br>")+"</p>").join("");
 }
 function renderChat(){
