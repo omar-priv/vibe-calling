@@ -93,6 +93,12 @@ class HostedHandler(core.Handler):
             else:
                 self._send_login()
             return
+        if path == "/__logout":
+            self.send_response(303)
+            self.send_header("Location", "/__login")
+            self.send_header("Set-Cookie", COOKIE_NAME + "=; Path=/; HttpOnly; " + ("Secure; " if COOKIE_SECURE else "") + "SameSite=Strict; Max-Age=0")
+            self.end_headers()
+            return
         if not _valid_session(self):
             self._redirect_login()
             return
