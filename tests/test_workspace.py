@@ -141,6 +141,16 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertIn("Resume saved task", app)
         self.assertNotIn("startStep+24", app)
         self.assertNotIn("n<startStep+24", app)
+        self.assertIn("while(true){", app)
+        self.assertIn("state.turnBudget=(", app)
+        self.assertIn("state.toolBudget=(", app)
+        self.assertIn("continuing autonomously", app)
+        loop_start = app.index("async function runAgentLoop(state,spinner){")
+        loop_end = app.index("async function send(text,attachments=[]){", loop_start)
+        agent_loop = app[loop_start:loop_end]
+        self.assertNotIn('pauseReason==="budget"', agent_loop)
+        self.assertIn('state.turnBudget=(Number(state.turnBudget)||AGENT_MAX_TURNS_PER_RUN)+AGENT_MAX_TURNS_PER_RUN', agent_loop)
+        self.assertIn('state.toolBudget=(Number(state.toolBudget)||AGENT_MAX_TOOL_CALLS_PER_RUN)+AGENT_MAX_TOOL_CALLS_PER_RUN', agent_loop)
 
     def test_new_workspace_tools_are_registered(self):
         root = Path(__file__).resolve().parents[1]

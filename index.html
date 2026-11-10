@@ -918,6 +918,12 @@ async function executePendingAgentTools(state){
    saveAgentResume(state);updateAgentLive("tool_result",{name,failed:true,detail:output.slice(0,180)});
    continue;
   }
+  if(state.toolCalls>=(Number(state.toolBudget)||AGENT_MAX_TOOL_CALLS_PER_RUN)){
+   state.toolBudget=(Number(state.toolBudget)||AGENT_MAX_TOOL_CALLS_PER_RUN)+AGENT_MAX_TOOL_CALLS_PER_RUN;
+   state.toolCheckpoints=(Number(state.toolCheckpoints)||0)+1;
+   saveAgentResume(state);
+   setAgentProgress("Automatic checkpoint saved · continuing with the next "+AGENT_MAX_TOOL_CALLS_PER_RUN+" tool calls");
+  }
   state.toolCalls=(Number(state.toolCalls)||0)+1;
   state.pendingToolStatus="running";
   state.pendingCurrentTool={id,name,index};
@@ -979,8 +985,20 @@ async function runAgentLoop(state,spinner){
  state.recentToolOutcomes=Array.isArray(state.recentToolOutcomes)?state.recentToolOutcomes:[];
  recoverInterruptedAgentTool(state);
  let answer="",finished=false,pauseReason="";
- while(state.turns<state.turnBudget&&state.toolCalls<state.toolBudget){
+ while(true){
   if(controller?.signal.aborted)throw new DOMException("Request stopped.","AbortError");
+  if(state.turns>=state.turnBudget){
+   state.turnBudget=(Number(state.turnBudget)||AGENT_MAX_TURNS_PER_RUN)+AGENT_MAX_TURNS_PER_RUN;
+   state.turnCheckpoints=(Number(state.turnCheckpoints)||0)+1;
+   saveAgentResume(state);
+   setAgentProgress("Automatic checkpoint saved · "+state.turns+" model turns completed; continuing autonomously");
+  }
+  if(state.toolCalls>=state.toolBudget){
+   state.toolBudget=(Number(state.toolBudget)||AGENT_MAX_TOOL_CALLS_PER_RUN)+AGENT_MAX_TOOL_CALLS_PER_RUN;
+   state.toolCheckpoints=(Number(state.toolCheckpoints)||0)+1;
+   saveAgentResume(state);
+   setAgentProgress("Automatic checkpoint saved · "+state.toolCalls+" tool calls completed; continuing autonomously");
+  }
   if(state.pendingToolCalls?.length){
    const repeated=await executePendingAgentTools(state);
    if(repeated){pauseReason="repeat";break}
@@ -1027,9 +1045,7 @@ async function runAgentLoop(state,spinner){
   saveAgentResume(state);
   if(state.emptyResponses>=2){pauseReason="empty";break}
  }
- if(!finished&&!pauseReason){
-  pauseReason=(state.turns>=state.turnBudget||state.toolCalls>=state.toolBudget)?"budget":"safety";
- }
+ if(!finished&&!pauseReason)pauseReason="safety";
  spinner?.remove();
  if(finished){
   clearAgentResume();
@@ -1040,7 +1056,6 @@ async function runAgentLoop(state,spinner){
   let pauseText="";
   if(pauseReason==="repeat")pauseText="**Agent paused to prevent a tool loop.** The same tool call with identical inputs and identical output appeared at least four times in the last 12 tool calls. Review the execution log; the agent can continue after this checkpoint, but it should inspect the current state and choose a different action.";
   else if(pauseReason==="empty")pauseText="**Agent paused because the model returned empty responses twice.** The task and tool results are saved. Continue after checking the provider/model response.";
-  else if(pauseReason==="budget")pauseText="**Long-running task checkpoint reached — the task is not marked complete.** This run used its safety budget of "+state.turnBudget+" model turns or "+state.toolBudget+" tool calls. Press **Continue task** to add another 500 model turns and 2,000 tool calls without losing the saved history.";
   else pauseText="**Agent paused at a safety checkpoint.** The task and completed tool results are saved. Press **Continue task** to resume.";
   addMessage("assistant",pauseText,{model:state.model,toolLog:state.used.length?"Tool execution: "+state.used.join(" · "):"",canContinue:true});
  }
