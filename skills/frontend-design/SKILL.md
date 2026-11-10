@@ -1,5 +1,5 @@
 ---
-name: frontend-design
+name: Frontend Design
 description: Design coherent, product-specific interfaces with clear hierarchy, accessible interactions, responsive layouts, and complete UI states.
 ---
 
