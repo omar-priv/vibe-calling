@@ -180,6 +180,38 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertIn('self.handle_remote_mcp(payload)', server_source)
         self.assertIn('def validate_remote_mcp_payload(payload):', server_source)
 
+    def test_research_api_route_is_registered_and_guarded(self):
+        root = Path(__file__).resolve().parents[1]
+        source = (root / "server.py").read_text(encoding="utf-8")
+        self.assertIn('"/api/research"', source)
+        self.assertIn('def handle_research(self, payload):', source)
+        self.assertIn('validate_research_url(final_url)', source)
+        self.assertIn("MAX_RESEARCH_PAGE_BYTES", source)
+        self.assertIn("class ResearchRedirectHandler", source)
+
+    def test_research_mode_and_single_chat_delete_are_wired(self):
+        root = Path(__file__).resolve().parents[1]
+        app = (root / "app.js").read_text(encoding="utf-8")
+        html = (root / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="researchMode"', html)
+        self.assertIn('function deleteChat(chatIdToDelete)', app)
+        self.assertIn('data-delete-chat=', app)
+        self.assertIn('toolDef("web_search"', app)
+        self.assertIn('toolDef("web_open"', app)
+        self.assertIn("buildResearchSystemPrompt", app)
+        self.assertIn("state.researchMode&&state.researchMode", app)
+        self.assertIn('researchMode==="deep"', app)
+        self.assertIn('write(KEYS.researchMode,researchMode)', app)
+
+    def test_mcp_pagination_handshake_and_execution_errors_are_checked(self):
+        root = Path(__file__).resolve().parents[1]
+        app = (root / "app.js").read_text(encoding="utf-8")
+        self.assertIn("result.nextCursor", app)
+        self.assertIn("valid initialization response", app)
+        self.assertIn("result.isError===true", app)
+        self.assertIn("GitHub MCP verified", app)
+        self.assertIn("Remote MCP verified", app)
+
     def test_index_exposes_new_controls(self):
         root = Path(__file__).resolve().parents[1]
         html = (root / "index.html").read_text(encoding="utf-8")
@@ -187,8 +219,53 @@ class FrontendBundleTests(unittest.TestCase):
                            "githubPatInput", "githubReadOnly", "connectGithubMcp",
                            "remoteMcpUrl", "remoteMcpToken", "remoteMcpReadOnly",
                            "saveRemoteMcpSettings", "connectRemoteMcp",
-                           "nvidiaCatalogGrid", "remoteBrowserHeading", "startProjectBtn", "stopProjectBtn", "projectMemoryPreview", "projectRuntimeStatus"):
+                           "nvidiaCatalogGrid", "researchMode", "remoteBrowserHeading", "startProjectBtn", "stopProjectBtn", "projectMemoryPreview", "projectRuntimeStatus"):
             self.assertIn('id="' + element_id + '"', html)
+
+
+class ResearchParsingTests(unittest.TestCase):
+    def test_duckduckgo_parser_reads_title_and_snippet(self):
+        html = (
+            '<a class="result__a" href="https://example.com/story">Example result</a>'
+            '<a class="result__snippet">A useful preview from the source.</a>'
+        )
+        parser = server.DuckDuckGoResultParser()
+        parser.feed(html)
+        self.assertEqual(len(parser.results), 1)
+        self.assertEqual(parser.results[0]["title"], "Example result")
+        self.assertIn("useful preview", parser.results[0]["snippet"])
+
+    def test_research_page_parser_excludes_scripts_and_navigation(self):
+        parser = server.ResearchPageParser()
+        parser.feed(
+            "<html><head><title>Trusted Title</title>"
+            "<script>secretPrompt();</script></head><body>"
+            "<nav>Navigation noise</nav><main><h1>Article</h1>"
+            "<p>Readable article text.</p></main></body></html>"
+        )
+        extracted = " ".join(parser.text_parts)
+        self.assertIn("Readable article text", extracted)
+        self.assertNotIn("secretPrompt", extracted)
+        self.assertNotIn("Navigation noise", extracted)
+
+    def test_research_page_requires_supported_text_content_type(self):
+        with self.assertRaisesRegex(ValueError, "supported text or HTML"):
+            server.extract_research_page(b"binary", "application/pdf")
+
+    def test_research_url_rejects_http_and_localhost_before_network_access(self):
+        with self.assertRaisesRegex(ValueError, "HTTPS"):
+            server.validate_research_url("http://example.com/page")
+        with self.assertRaisesRegex(ValueError, "Local and private"):
+            server.validate_research_url("https://localhost/page")
+
+    def test_research_result_unwraps_duckduckgo_https_destination(self):
+        from urllib.parse import quote
+        target = "https://example.com/article?id=1"
+        wrapped = "https://duckduckgo.com/l/?uddg=" + quote(target, safe="")
+        self.assertEqual(server.normalize_research_result_url(wrapped), target)
+
+    def test_research_result_rejects_plain_http_destination(self):
+        self.assertEqual(server.normalize_research_result_url("http://example.com/article"), "")
 
 
 class RemoteMCPValidationTests(unittest.TestCase):
@@ -243,7 +320,7 @@ class AgentSkillTests(unittest.TestCase):
             "debugging", "code-review", "security-review", "github-management",
             "visual-reference-research", "ux-review", "accessibility-review",
             "performance-engineering", "api-integration", "mcp-server-integration",
-            "browser-visual-testing", "release-engineering", "web-research",
+            "browser-visual-testing", "release-engineering", "web-research", "deep-research",
         }
         self.assertTrue(expected.issubset(skill_ids))
 
@@ -258,7 +335,7 @@ class AgentSkillTests(unittest.TestCase):
         self.assertIn("primary sources", server.read_available_skill("custom:research-helper"))
 
     def test_all_builtin_skills_are_counted(self):
-        self.assertEqual(len(server.list_available_skills()), 19)
+        self.assertEqual(len(server.list_available_skills()), 20)
 
     def test_zip_skill_rejects_parent_traversal(self):
         buffer = io.BytesIO()
