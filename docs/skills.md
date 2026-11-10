@@ -1,6 +1,6 @@
 # Vibe Calling Agent Skills
 
-The following 19 skills are bundled in the repository and available immediately through Agent mode:
+The following 20 skills are bundled in the repository and available immediately through Agent mode:
 
 | Skill | Purpose |
 |---|---|
@@ -22,11 +22,12 @@ The following 19 skills are bundled in the repository and available immediately 
 | `mcp-server-integration` | Connect remote Streamable HTTP MCP servers with session handling and tool approval policies |
 | `browser-visual-testing` | Verify real UI journeys and visual regressions in an actual browser |
 | `release-engineering` | Prepare safe GitHub releases using isolated branches, CI, diffs, and rollback plans |
-| `web-research` | Research current technical information using primary sources and cross-checking |
+| `web-research` | Perform fast current lookups with source verification and citations |
+| `deep-research` | Conduct multi-angle investigations with primary sources, date checks, conflicting evidence, and traceable synthesis |
 
 ## How the agent uses them
 
-The Agent receives the skill names and summaries. Before substantial design or code changes, it should read the most relevant one to three skill files using the built-in `skill_read` tool, inspect the project, then work through a concise plan and verification steps.
+The Agent receives the skill names and summaries. Before substantial design or code changes, it should read the relevant skill files using the built-in `skill_read` tool, inspect the project, then work through a concise plan and verification steps. Web Research loads `web-research`; Deep Research loads both research skills and follows the multi-source investigation process.
 
 Skills provide reusable instructions; they do not retrain the underlying model.
 
