@@ -493,6 +493,16 @@ async function refreshWorkspacePanel(){
   if(memoryPreview)memoryPreview.textContent="Project memory unavailable.";
  }
 }
+async function researchRequest(action,payload){
+ let response,raw;
+ try{
+  response=await fetch("/api/research",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action,...payload})});
+  raw=await response.text();
+ }catch(error){throw new Error("Could not reach the local web research service. Check that start.bat is running. "+error.message)}
+ let data={};try{data=raw?JSON.parse(raw):{}}catch{}
+ if(!response.ok||data.ok===false)throw new Error(data.error||("Web research failed (HTTP "+response.status+")."));
+ return data;
+}
 async function runTool(name,a){
  if(name.startsWith("mcp_github_"))return callGithubMcpTool(name,a);
  if(skillCatalog.some(skill=>skill.id===name)){
