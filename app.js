@@ -403,7 +403,7 @@ function renderRemoteMcpStatus(){
  if(url&&document.activeElement!==url)url.value=remoteMcpConfig.url||"";
  if(token&&document.activeElement!==token)token.value=remoteMcpConfig.token||"";
  if(readOnly)readOnly.checked=remoteMcpConfig.readOnly!==false;
- if(status)status.textContent=remoteMcpConfig.connected?(remoteMcpTools.length+" tools connected · "+(remoteMcpConfig.readOnly?"read-only":"writes require confirmation")):"Not connected. Enter a remote HTTPS MCP endpoint and connect.";
+ if(status)status.textContent=remoteMcpConfig.connected?(remoteMcpTools.length+" tools verified · "+(remoteMcpConfig.readOnly?"read-only":"writes require confirmation")):"Not connected. Enter a remote HTTPS MCP endpoint and connect.";
 }
 async function remoteMcpRequest(message){
  const response=await fetch("/api/mcp/remote",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({url:remoteMcpConfig.url,token:remoteMcpConfig.token||"",session_id:remoteMcpConfig.sessionId||"",read_only:remoteMcpConfig.readOnly!==false,message})});
