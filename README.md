@@ -17,7 +17,7 @@ No Node.js, npm, Docker, frontend build, or database is required to run the appl
 - Multiple OpenAI-compatible providers; provider keys and settings are saved automatically in this browser.
 - Free-model-only discovery. NVIDIA NIM has a curated, newest-first catalog of 12 Free Endpoint models with documented Chat Completions examples. Gemini uses a curated Flash allowlist. OpenRouter models must be marked `:free` or provide zero pricing metadata. Other providers require explicit zero pricing metadata.
 - Multi-conversation chat history.
-- Agent mode with long-running, resumable tasks (500 model turns per run, extendable at checkpoints), project creation, file read/write, static preview, and a limited, confirmation-gated command allowlist.
+- Agent mode with long-running, resumable tasks with automatic checkpoints every 500 model turns / 2,000 tool calls, project creation, file read/write, static preview, and a limited, confirmation-gated command allowlist.
 - Nineteen built-in Agent Skills covering planning, visual-reference research, UX, frontend/backend development, accessibility, API/MCP integration, browser testing, debugging, performance, security, code review, web research, and release management.
 - Import your own skills as a `.md` file or a `.zip` package containing one `SKILL.md`.
 - Attach up to three files to a chat message (2 MB each; 4 MB total). Supported formats include common text/code files and PNG/JPG/WEBP/GIF images.
