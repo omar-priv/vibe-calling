@@ -1,5 +1,5 @@
 ---
-name: ux-review
+name: UX Review
 description: Audit complete user journeys for clarity, discoverability, feedback, accessibility, recovery, and interaction friction.
 ---
 
