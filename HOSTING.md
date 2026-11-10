@@ -25,7 +25,7 @@ This is a separate deployment edition. The Windows/local edition remains unchang
 - This is a private, single-owner hosted workspace, not a multi-user SaaS. Do not share the access password.
 - The AI provider, GitHub MCP and remote MCP credentials are stored in browser local storage by the current UI. They are not encrypted by the app. Avoid shared/public browser profiles and sign out after use.
 - Render persistent disks are attached to one service instance; do not scale this service horizontally.
-- Static HTML project previews are served through the hosted app. Starting arbitrary development servers on a remote host is not equivalent to local preview and may require additional port-routing work.
+- Static HTML project previews are served through the hosted app. Remote Vite/Next.js development-server preview and hot-module-reload are not included in this first hosted edition; use static output for previews. Build commands may also hit the memory limit of the smallest instance.
 - The current project command allowlist executes on the hosted server. Keep this service private, use narrow provider/MCP permissions, and never expose it without the password gate.
 - Render free instances sleep and have ephemeral filesystems; they are unsuitable for persistent agent projects. The included blueprint deliberately selects a paid Starter instance and persistent disk.
 - A successful deployment/health check does not prove that every provider, model, MCP server, or project build command works. Test those integrations after deployment.
@@ -39,4 +39,4 @@ Set these environment variables before running:
 - `VIBE_DATA_DIR`: writable directory, for example `./hosted-data`
 - `PORT`: optional, defaults to 10000
 
-Then run `python hosted_server.py`. The original `start.bat` and `server.py` remain the local edition.
+Then run `python hosted_server.py`. Set `VIBE_COOKIE_SECURE=0` only for local HTTP smoke tests; leave it unset (secure cookies enabled) on Render. Visit `/__logout` to clear the hosted session. The original `start.bat` and `server.py` remain the local edition.
