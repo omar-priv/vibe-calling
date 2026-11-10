@@ -67,7 +67,7 @@ The Python server binds only to `127.0.0.1`. Approved project scripts and comman
 
 ## What is MCP?
 
-MCP stands for **Model Context Protocol**. It is a standard way for an AI host to connect to external tool providers. An MCP server can expose tools, resources, and prompt templates. The host discovers the tools and their input schemas, then lets the model choose a tool call. Vibe Calling validates the initialize response, follows paginated tools/list cursors, and propagates tool-level isError results back to Agent mode. MCP is a connector protocol, not a model or an autonomous agent by itself.
+MCP stands for **Model Context Protocol**. It is a standard way for an AI host to connect to external tool providers. An MCP server can expose tools, resources, and prompt templates. The host discovers the tools and their input schemas, then lets the model choose a tool call. Vibe Calling validates the initialize response, reads paginated tools/list results (up to 100 tools), rejects an empty tool list, uses unique model-facing function names, and propagates tool-level isError results back to Agent mode. MCP is a connector protocol, not a model or an autonomous agent by itself.
 
 ## GitHub MCP inside Vibe Calling
 
@@ -84,7 +84,7 @@ Vibe Calling includes an in-app client for the official hosted GitHub MCP endpoi
 1. Open **Agent tools → GitHub MCP**.
 2. Create a fine-grained GitHub token scoped only to the repositories you want the agent to access.
 3. Paste it into the token field.
-4. Leave **Read-only mode** checked and choose **Connect GitHub**.
+4. Leave **Read-only mode** checked and choose **Connect / Verify**.
 5. After the verification message reports that tools are available, enable Agent mode in Chat and ask it to inspect one of your repositories.
 
 The token is stored in browser local storage so the connection can persist after reload. It is not encrypted by this app. Avoid shared browser profiles; do not send the token in chat or commit it to source control.
