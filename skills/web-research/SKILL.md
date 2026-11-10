@@ -1,5 +1,5 @@
 ---
-name: web-research
+name: Web Research
 description: Answer current and simple questions with focused web search, source verification, date awareness, and citations.
 ---
 
