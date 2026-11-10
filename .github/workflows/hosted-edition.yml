@@ -1,0 +1,35 @@
+name: Hosted Edition checks
+
+on:
+  push:
+    branches: [hosting/second-edition]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  syntax-and-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile Python files
+        run: python -m py_compile server.py hosted_server.py
+      - name: Validate deployment files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import ast
+          source = Path("hosted_server.py").read_text(encoding="utf-8")
+          ast.parse(source)
+          render = Path("render.yaml").read_text(encoding="utf-8")
+          required = ["VIBE_ACCESS_PASSWORD", "VIBE_SESSION_SECRET", "/var/data", "sizeGB: 1"]
+          missing = [item for item in required if item not in render]
+          if missing:
+              raise SystemExit("Missing Render settings: " + ", ".join(missing))
+          assert "127.0.0.1" not in source
+          assert "HttpOnly" in source and "SameSite=Strict" in source
+          print("Hosted deployment configuration checks passed.")
+          PY
