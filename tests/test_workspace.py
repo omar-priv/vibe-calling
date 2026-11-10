@@ -222,6 +222,13 @@ class FrontendBundleTests(unittest.TestCase):
                            "nvidiaCatalogGrid", "researchMode", "remoteBrowserHeading", "startProjectBtn", "stopProjectBtn", "projectMemoryPreview", "projectRuntimeStatus"):
             self.assertIn('id="' + element_id + '"', html)
 
+    def test_chat_switch_and_delete_are_blocked_during_active_response(self):
+        root = Path(__file__).resolve().parents[1]
+        app = (root / "app.js").read_text(encoding="utf-8")
+        self.assertIn("if(busy&&chatIdToDelete===chatId)", app)
+        self.assertIn("before starting a new chat", app)
+        self.assertIn("before switching chats", app)
+
 
 class ResearchParsingTests(unittest.TestCase):
     def test_duckduckgo_parser_reads_title_and_snippet(self):
