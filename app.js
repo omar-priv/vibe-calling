@@ -504,6 +504,15 @@ async function researchRequest(action,payload){
  return data;
 }
 async function runTool(name,a){
+ if(name==="web_search"){
+  const data=await researchRequest("search",{query:String(a.query||""),max_results:Number(a.max_results)||5,time_range:a.time_range||"any"});
+  return JSON.stringify({query:data.query,time_range:data.time_range,provider:data.provider,note:data.note,results:data.results},null,2).slice(0,18000);
+ }
+ if(name==="web_open"){
+  const data=await researchRequest("open",{url:String(a.url||"")});
+  return ("SOURCE: "+data.title+"\nURL: "+data.url+"\nCONTENT:\n"+data.content).slice(0,24000);
+ }
+
  if(name.startsWith("mcp_github_"))return callGithubMcpTool(name,a);
  if(skillCatalog.some(skill=>skill.id===name)){
   const content=await readSkill(name);
