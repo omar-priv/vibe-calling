@@ -243,6 +243,15 @@ async function testProvider(){
   finally{button.disabled=false;button.textContent=label;button.classList.remove("is-loading");}
 }
 function addMessage(role,content,extra={}){const c=current();if(!c)return;c.messages.push({role,content,...extra});if(role==="user"&&c.title==="New conversation")c.title=content.slice(0,42)+(content.length>42?"…":"");saveChats();renderChat()}
+function deleteChat(chatIdToDelete){
+ const target=chats.find(chat=>chat.id===chatIdToDelete);
+ if(!target)return;
+ if(!confirm("Delete this conversation permanently?\\n\\n"+(target.title||"Conversation")))return;
+ chats=chats.filter(chat=>chat.id!==chatIdToDelete);
+ if(pendingAgentRun?.chatId===chatIdToDelete)clearAgentResume();
+ if(chatId===chatIdToDelete)chatId=chats[0]?.id||null;
+ saveChats();renderChat();renderHistory();toast("Conversation deleted");
+}
 function selected(){const v=$("#modelSelect").value,i=v.indexOf("::");return i<0?{}:{provider:byId(v.slice(0,i)),model:v.slice(i+2)}}
 function calculate(expr){if(!/^[\d\s.+\-*/()%]+$/.test(expr)||!expr.trim())throw Error("Invalid expression");const ts=expr.match(/\d+(?:\.\d+)?|[()+\-*/%]/g)||[];if(ts.join("")!==expr.replace(/\s/g,""))throw Error("Invalid expression");const out=[],ops=[],pr={"+":1,"-":1,"*":2,"/":2,"%":2};let prev="start";for(const t of ts){if(/^\d/.test(t)){if(prev==="number"||prev===")")throw Error("Invalid expression");out.push(Number(t));prev="number"}else if(t==="("){if(prev==="number"||prev===")")throw Error("Invalid expression");ops.push(t);prev="("}else if(t===")"){while(ops.length&&ops.at(-1)!=="(")out.push(ops.pop());if(ops.pop()!=="(")throw Error("Mismatched parentheses");prev=")"}else{if(prev!=="number"&&prev!==")"){if((t==="-"||t==="+")&&["start","(","operator"].includes(prev))out.push(0);else throw Error("Invalid expression")}while(ops.length&&pr[ops.at(-1)]>=pr[t])out.push(ops.pop());ops.push(t);prev="operator"}}while(ops.length){const op=ops.pop();if(op==="(")throw Error("Mismatched parentheses");out.push(op)}const st=[];for(const t of out){if(typeof t==="number")st.push(t);else{const b=st.pop(),a=st.pop();st.push(t==="+"?a+b:t==="-"?a-b:t==="*"?a*b:t==="/"?a/b:a%b)}}if(st.length!==1||!Number.isFinite(st[0]))throw Error("Invalid result");return String(st[0])}
 const activeProjectKey="vc_active_project_v1";
@@ -943,6 +952,7 @@ if(b.id==="uploadSkillBtn"){$("#skillFileInput").click();return}
 if(b.dataset.skillRead){readSkill(b.dataset.skillRead).then(content=>{const w=window.open("","_blank");if(w){const pre=w.document.createElement("pre");pre.textContent=content;pre.style.cssText="white-space:pre-wrap;font:14px/1.6 monospace;padding:24px";w.document.body.appendChild(pre)}else toast("Pop-up blocked")}).catch(error=>toast(error.message));return}
 if(b.dataset.removeAttachment!==undefined){pendingAttachments.splice(Number(b.dataset.removeAttachment),1);renderPendingAttachments();return}
 if(b.id==="previewProjectBtn"){(async()=>{const tab=window.open("about:blank","_blank");try{if(!activeProject)throw Error("Select a project first.");const data=await workspaceRequest({action:"preview",project:activeProject});if(tab)tab.location=data.url;else toast(data.url)}catch(error){if(tab)tab.close();toast(error.message)}})();return}
+if(b.dataset.deleteChat){deleteChat(b.dataset.deleteChat);return}
 if(b.id==="clearHistory"){if(confirm("Clear all conversations?")){clearAgentResume();chats=[];chatId=null;saveChats();renderChat()}return}
 if(b.id==="clearAll"){$("#confirmDialog").showModal();return}
 if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));try{sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}clearAgentResume();providers=[];chats=[];notes=[];chatId=null;remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};remoteMcpTools=[];remoteMcpToolMap={};$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
