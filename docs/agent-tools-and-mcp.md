@@ -131,13 +131,19 @@ Read-only mode allows only tools explicitly marked `readOnlyHint: true`. Other t
 This connector targets **remote Streamable HTTP**. A local MCP server that requires `stdio` must be launched and supervised by a local process manager; entering its command into this URL field will not work. Remote Browser / Computer Use remains a separate planned Beta feature.
 
 
-## Agent execution, continuation, project runtime, and memory
+## Agent execution, long-running tasks, continuation, project runtime, and memory
 
-Agent mode now preloads up to three relevant built-in skills for the current request. Skill IDs are instructions, not function calls: the agent reads them with `skill_read({id})`. If a model mistakenly emits a built-in skill ID as a tool name, the client resolves it by reading that skill instead of treating it as an unknown tool.
+Agent mode preloads up to three relevant built-in skills for the current request. Skill IDs are instructions, not function calls: the agent reads them with skill_read({id}). If a model mistakenly emits a built-in skill ID as a tool name, the client resolves it by reading that skill instead of treating it as an unknown tool.
 
-The agent has a bounded 24-step tool cycle. When the cycle ends without a final answer, or the provider/network request fails after the task context is created, the application preserves the conversation history, provider/model selection, tool results, and next step in the current browser session. A **Continue task** action resumes that state. The **Stop** control aborts the current request; completed project file changes remain saved. A provider must still be configured in the browser to resume a task.
+Long-running tasks are no longer stopped after 24 model turns. Each active run has a safety budget of 500 model turns and 2,000 tool calls. Reaching the budget creates a checkpoint, not a success result; Continue task adds another 500 turns and 2,000 tool calls. The run continues automatically between these checkpoints while the app is open.
 
-Each project can store a small JSON memory file at `.vibe/memory.json`. This folder is hidden from normal project file listings and is not exposed to ordinary workspace read/write tools. The memory contains the goal, summary, stack, decisions, completed work, and next steps. Use `workspace_read_memory` and `workspace_update_memory` to maintain it across separate conversations and sessions on the same local workspace.
+The task checkpoint is stored in browser localStorage and survives page reloads and browser restarts in the same browser profile. If the page is closed during a tool call, that call is marked as having an unknown outcome and is not automatically replayed, because replaying a file write or command could duplicate a side effect. The agent is instructed to inspect the current project state before deciding what to do next. A saved task can be resumed from its conversation.
+
+A loop guard pauses the task when the same tool is called three times consecutively with identical inputs and the same result. Repeated empty model responses also pause the run. Older conversation/tool history is periodically compacted into a factual work-log checkpoint to control context and browser storage growth; the agent is instructed to re-open files and verify state instead of trusting compacted details as current truth.
+
+Stopping a run aborts the active model request. Completed project changes remain saved. A provider must still be configured in the browser to resume a task. This is not a background worker: the browser tab and local Vibe Calling server must remain running for the agent to make progress. Closing the browser pauses execution; the task can be resumed later, but it does not continue while the browser is closed.
+
+Each project can store a small JSON memory file at .vibe/memory.json. This folder is hidden from normal project file listings and is not exposed to ordinary workspace read/write tools. The memory contains the goal, summary, stack, decisions, completed work, and next steps. Use workspace_read_memory and workspace_update_memory to maintain it across separate conversations and sessions on the same local workspace.
 
 ### Running a project
 
