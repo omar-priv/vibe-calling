@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: vibe-calling-hosted
+    runtime: python
+    plan: starter
+    branch: hosting/second-edition
+    buildCommand: pip install -r requirements-hosted.txt
+    startCommand: python hosted_server.py
+    healthCheckPath: /__health
+    disk:
+      name: vibe-calling-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: VIBE_ACCESS_PASSWORD
+        sync: false
+      - key: VIBE_SESSION_SECRET
+        generateValue: true
+      - key: VIBE_DATA_DIR
+        value: /var/data
