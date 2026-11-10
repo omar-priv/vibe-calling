@@ -1,5 +1,5 @@
 ---
-name: deep-research
+name: Deep Research
 description: Conduct multi-angle research with primary sources, cross-validation, dates, competing evidence, and a traceable synthesis.
 ---
 
