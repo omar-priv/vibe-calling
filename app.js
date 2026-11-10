@@ -248,7 +248,7 @@ function addMessage(role,content,extra={}){const c=current();if(!c)return;c.mess
 function deleteChat(chatIdToDelete){
  const target=chats.find(chat=>chat.id===chatIdToDelete);
  if(!target)return;
- if(!confirm("Delete this conversation permanently?\\n\\n"+(target.title||"Conversation")))return;
+ if(!confirm("Delete this conversation permanently?\n\n"+(target.title||"Conversation")))return;
  chats=chats.filter(chat=>chat.id!==chatIdToDelete);
  if(pendingAgentRun?.chatId===chatIdToDelete)clearAgentResume();
  if(chatId===chatIdToDelete)chatId=chats[0]?.id||null;
