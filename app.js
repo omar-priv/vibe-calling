@@ -839,7 +839,7 @@ async function runAgentLoop(state,spinner){
   setAgentProgress("Waiting for model · turn "+turn+" / "+state.turnBudget);
   state.turns=turn;state.step=turn;state.pauseReason="";
   saveAgentResume(state);
-  const streamBody={model:state.model,messages:state.history,temperature:.7,tools:buildAgentTools(),tool_choice:"auto"};
+  const streamBody={model:state.model,messages:state.history,temperature:.7,tools:state.researchMode&&state.researchMode!=="off"?researchTools:buildAgentTools(),tool_choice:"auto"};
   let msg;
   try{
    msg=await apiStream(provider,streamBody,controller.signal,event=>{
