@@ -24,6 +24,7 @@ SESSION_SECRET = os.environ.get("VIBE_SESSION_SECRET", "")
 DATA_DIR = Path(os.environ.get("VIBE_DATA_DIR", "/var/data")).resolve()
 COOKIE_NAME = "vibe_hosted_session"
 SESSION_SECONDS = 12 * 60 * 60
+COOKIE_SECURE = os.environ.get("VIBE_COOKIE_SECURE", "1").strip().lower() not in {"0", "false", "no"}
 LOGIN_ATTEMPTS = {}
 LOGIN_PAGE = """<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vibe Calling · Sign in</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1020;color:#eef2ff;font:16px system-ui}.card{width:min(92vw,390px);padding:30px;border:1px solid #29334d;border-radius:18px;background:#121a2d;box-shadow:0 20px 70px #0006}h1{margin:0 0 8px}p{color:#aab6ce;line-height:1.5}input,button{width:100%;padding:14px;border-radius:10px;font:inherit}input{margin:14px 0;background:#0b1020;color:white;border:1px solid #394763}button{border:0;background:#8b9cff;color:#10162a;font-weight:700;cursor:pointer}.err{color:#ff9b9b}</style><main class="card"><h1>Vibe Calling</h1><p>This private workspace is protected. Sign in to continue.</p><form method="post" action="/__login"><label for="password">Access password</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus><button type="submit">Sign in</button></form><p class="err" id="error"></p></main></html>"""
 
@@ -73,7 +74,8 @@ class HostedHandler(core.Handler):
         return parsed.scheme == forwarded
 
     def _send_login(self, status=200):
-        body = LOGIN_PAGE.encode("utf-8")
+        page = LOGIN_PAGE.replace('<p class="err" id="error"></p>', '<p class="err" id="error">Incorrect password. Please try again.</p>' if status == 401 else '<p class="err" id="error"></p>')
+        body = page.encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -83,7 +85,7 @@ class HostedHandler(core.Handler):
     def do_GET(self):
         path = urlsplit(self.path).path
         if path == "/__health":
-            self.send_json(200, {"status": "ok", "edition": "hosted", "storage": str(DATA_DIR)})
+            self.send_json(200, {"status": "ok", "edition": "hosted"})
             return
         if path == "/__login":
             if _valid_session(self):
@@ -126,7 +128,7 @@ class HostedHandler(core.Handler):
         if route == "/__logout":
             self.send_response(303)
             self.send_header("Location", "/__login")
-            self.send_header("Set-Cookie", COOKIE_NAME + "=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")
+            self.send_header("Set-Cookie", COOKIE_NAME + "=; Path=/; HttpOnly; " + ("Secure; " if COOKIE_SECURE else "") + "SameSite=Strict; Max-Age=0")
             self.end_headers()
             return
         if not _valid_session(self):
@@ -204,7 +206,7 @@ class HostedHandler(core.Handler):
         signature = _session_signature(timestamp)
         self.send_response(303)
         self.send_header("Location", "/")
-        self.send_header("Set-Cookie", f"{COOKIE_NAME}={timestamp}.{signature}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={SESSION_SECONDS}")
+        self.send_header("Set-Cookie", f"{COOKIE_NAME}={timestamp}.{signature}; Path=/; HttpOnly; " + ("Secure; " if COOKIE_SECURE else "") + f"SameSite=Strict; Max-Age={SESSION_SECONDS}")
         self.end_headers()
 
 
