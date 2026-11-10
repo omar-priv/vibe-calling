@@ -21,6 +21,7 @@ try{
  pendingAgentRun=savedAgentState?JSON.parse(savedAgentState):null;
  if(pendingAgentRun&&!localStorage.getItem(AGENT_RESUME_KEY))localStorage.setItem(AGENT_RESUME_KEY,savedAgentState);
 }catch{pendingAgentRun=null}
+if(pendingAgentRun?.chatId&&chats.some(chat=>chat.id===pendingAgentRun.chatId))chatId=pendingAgentRun.chatId;
 let remoteMcpConfig=read(KEYS.remoteMcp,{name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false});
 if(!remoteMcpConfig||typeof remoteMcpConfig!=="object")remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};
 const uid=()=>globalThis.crypto?.randomUUID?.()||("vc-"+Date.now()+"-"+Math.random().toString(36).slice(2));
@@ -779,7 +780,6 @@ async function runAgentLoop(state,spinner){
   }
   if(!msg)throw new Error("Provider returned an empty response.");
   state.history.push(msg);
-  saveAgentResume(state);
   if(Array.isArray(msg.tool_calls)&&msg.tool_calls.length){
    state.pendingToolCalls=msg.tool_calls;
    state.pendingToolIndex=0;
@@ -790,6 +790,7 @@ async function runAgentLoop(state,spinner){
    if(repeated){pauseReason="repeat";break}
    continue;
   }
+  saveAgentResume(state);
   answer=typeof msg.content==="string"?msg.content:"";
   if(answer.trim()){finished=true;break}
   state.emptyResponses++;
@@ -908,7 +909,7 @@ if(b.id==="uploadSkillBtn"){$("#skillFileInput").click();return}
 if(b.dataset.skillRead){readSkill(b.dataset.skillRead).then(content=>{const w=window.open("","_blank");if(w){const pre=w.document.createElement("pre");pre.textContent=content;pre.style.cssText="white-space:pre-wrap;font:14px/1.6 monospace;padding:24px";w.document.body.appendChild(pre)}else toast("Pop-up blocked")}).catch(error=>toast(error.message));return}
 if(b.dataset.removeAttachment!==undefined){pendingAttachments.splice(Number(b.dataset.removeAttachment),1);renderPendingAttachments();return}
 if(b.id==="previewProjectBtn"){(async()=>{const tab=window.open("about:blank","_blank");try{if(!activeProject)throw Error("Select a project first.");const data=await workspaceRequest({action:"preview",project:activeProject});if(tab)tab.location=data.url;else toast(data.url)}catch(error){if(tab)tab.close();toast(error.message)}})();return}
-if(b.id==="clearHistory"){if(confirm("Clear all conversations?")){chats=[];chatId=null;saveChats();renderChat()}return}
+if(b.id==="clearHistory"){if(confirm("Clear all conversations?")){clearAgentResume();chats=[];chatId=null;saveChats();renderChat()}return}
 if(b.id==="clearAll"){$("#confirmDialog").showModal();return}
 if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));try{sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}clearAgentResume();providers=[];chats=[];notes=[];chatId=null;remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};remoteMcpTools=[];remoteMcpToolMap={};$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
 if(b.id==="chatOptions"){toast("More options coming soon.");return}
