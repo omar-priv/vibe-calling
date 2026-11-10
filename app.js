@@ -345,17 +345,32 @@ async function githubMcpRequest(message){
 async function connectGitHubMcp(){
  const token=$("#githubPatInput")?.value.trim()||mcpConfig.token||"";
  if(!token){toast("Paste a GitHub fine-grained token first.");return}
- mcpConfig.token=token;mcpConfig.connected=false;mcpConfig.sessionId="";mcpConfig.readOnly=$("#githubReadOnly")?.checked!==false;saveMcpConfig();
+ mcpConfig.token=token;mcpConfig.connected=false;mcpConfig.sessionId="";mcpConfig.readOnly=$("#githubReadOnly")?.checked!==false;
+ githubMcpTools=[];githubMcpToolMap={};saveMcpConfig();
  try{
-  const init=await githubMcpRequest({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2025-03-26",capabilities:{},clientInfo:{name:"Vibe Calling",version:"0.2.0"}}});
+  const init=await githubMcpRequest({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2025-03-26",capabilities:{},clientInfo:{name:"Vibe Calling",version:"0.4.0"}}});
   if(init.response?.error)throw new Error(init.response.error.message||"GitHub MCP initialization failed.");
+  if(!init.response?.result?.serverInfo)throw new Error("GitHub MCP did not return a valid initialization response.");
   await githubMcpRequest({jsonrpc:"2.0",method:"notifications/initialized",params:{}});
-  const listed=await githubMcpRequest({jsonrpc:"2.0",id:2,method:"tools/list",params:{}});
-  if(listed.response?.error)throw new Error(listed.response.error.message||"Could not list GitHub tools.");
-  githubMcpTools=(listed.response?.result?.tools||[]).slice(0,40);githubMcpToolMap={};
-  githubMcpTools.forEach((tool,index)=>{const fn="mcp_github_"+String(tool.name||("tool_"+index)).replace(/[^a-zA-Z0-9_]/g,"_").slice(0,48);githubMcpToolMap[fn]=tool});
-  mcpConfig.connected=true;saveMcpConfig();toast("GitHub MCP connected · "+githubMcpTools.length+" tools");
- }catch(error){mcpConfig.connected=false;saveMcpConfig();toast("GitHub MCP connection failed: "+error.message)}
+  let cursor="",allTools=[];
+  for(let page=0;page<5&&allTools.length<100;page++){
+   const listed=await githubMcpRequest({jsonrpc:"2.0",id:2+page,method:"tools/list",params:cursor?{cursor}:{}});
+   if(listed.response?.error)throw new Error(listed.response.error.message||"Could not list GitHub tools.");
+   const result=listed.response?.result;
+   if(!result||!Array.isArray(result.tools))throw new Error("GitHub MCP returned an invalid tools/list response.");
+   allTools.push(...result.tools);cursor=result.nextCursor||"";
+   if(!cursor)break;
+  }
+  githubMcpTools=allTools.slice(0,100);githubMcpToolMap={};
+  githubMcpTools.forEach((tool,index)=>{
+   const safe=String(tool.name||"tool").replace(/[^a-zA-Z0-9_]/g,"_").slice(0,38);
+   githubMcpToolMap["mcp_github_"+safe+"_"+index]=tool;
+  });
+  if(!githubMcpTools.length)throw new Error("GitHub MCP initialized but returned no tools. Check token permissions and server toolsets.");
+  mcpConfig.connected=true;saveMcpConfig();toast("GitHub MCP verified · "+githubMcpTools.length+" tools available");
+ }catch(error){
+  mcpConfig.connected=false;githubMcpTools=[];githubMcpToolMap={};saveMcpConfig();toast("GitHub MCP verification failed: "+error.message);
+ }
 }
 function buildAgentTools(){
  const remote=Object.entries(githubMcpToolMap).map(([fn,tool])=>({type:"function",function:{name:fn,description:String(tool.description||tool.title||tool.name).slice(0,900),parameters:tool.inputSchema||{type:"object",properties:{}}}}));
