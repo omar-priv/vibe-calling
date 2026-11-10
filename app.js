@@ -667,13 +667,100 @@ function updateAgentLive(type,payload){
   if(type==="tool_result")item.dataset.done="true";
  }
 }
+function stableAgentValue(value){
+ if(Array.isArray(value))return "["+value.map(stableAgentValue).join(",")+"]";
+ if(value&&typeof value==="object")return "{"+Object.keys(value).sort().map(key=>JSON.stringify(key)+":"+stableAgentValue(value[key])).join(",")+"}";
+ return JSON.stringify(value);
+}
+function agentFingerprint(value){
+ const source=String(value||"");let hash=2166136261;
+ for(let i=0;i<source.length;i++){hash^=source.charCodeAt(i);hash=Math.imul(hash,16777619)}
+ return (hash>>>0).toString(16);
+}
+async function executePendingAgentTools(state){
+ const calls=Array.isArray(state.pendingToolCalls)?state.pendingToolCalls:[];
+ let repeated=false;
+ while((Number(state.pendingToolIndex)||0)<calls.length){
+  if(controller?.signal.aborted)throw new DOMException("Request stopped.","AbortError");
+  const index=Number(state.pendingToolIndex)||0,call=calls[index],name=call.function?.name||"unknown_tool";
+  const id=call.id||("vc-tool-"+(state.turns||0)+"-"+index);
+  let args={};
+  try{args=JSON.parse(call.function?.arguments||"{}")}catch(error){
+   const output="Tool error: Invalid JSON arguments. "+error.message;
+   state.history.push({role:"tool",tool_call_id:id,name,content:output});
+   state.used.push(name+" · invalid arguments");
+   state.pendingToolIndex=index+1;state.pendingToolStatus="";state.pendingCurrentTool=null;
+   saveAgentResume(state);updateAgentLive("tool_result",{name,failed:true,detail:output.slice(0,180)});
+   continue;
+  }
+  state.toolCalls=(Number(state.toolCalls)||0)+1;
+  state.pendingToolStatus="running";
+  state.pendingCurrentTool={id,name,index};
+  saveAgentResume(state);
+  setAgentProgress("Running tool "+state.toolCalls+" · "+name);
+  updateAgentLive("tool",{name});
+  let output="",failed=false;
+  try{
+   output=await runTool(name,args);
+   if(typeof output==="string"&&output.startsWith("User declined"))state.used.push(name+" declined");
+   else{
+    if(typeof output==="string"&&/^Command failed with exit code|^Tool error:|^Error:/i.test(output))throw new Error(output);
+    state.used.push(name+" ✓");
+   }
+  }catch(error){
+   failed=true;output="Tool error: "+(error.message||String(error));state.used.push(name+" failed");
+  }
+  const fullOutput=String(output);
+  const signature=name+"|"+stableAgentValue(args);
+  const fingerprint=agentFingerprint(fullOutput);
+  const previous=state.lastToolOutcome;
+  state.repeatStreak=previous&&previous.signature===signature&&previous.fingerprint===fingerprint?(Number(state.repeatStreak)||0)+1:0;
+  state.lastToolOutcome={signature,fingerprint};
+  if(state.repeatStreak>=2)repeated=true;
+  state.history.push({role:"tool",tool_call_id:id,name,content:fullOutput.slice(0,12000)});
+  state.pendingToolIndex=index+1;state.pendingToolStatus="";state.pendingCurrentTool=null;
+  if(state.used.length>300)state.used=state.used.slice(-300);
+  updateAgentLive("tool_result",{name,failed,detail:fullOutput.slice(0,180)});
+  saveAgentResume(state);
+  setAgentProgress((failed?"Tool failed · ":"Completed tool · ")+name);
+ }
+ state.pendingToolCalls=[];state.pendingToolIndex=0;state.pendingToolStatus="";state.pendingCurrentTool=null;
+ saveAgentResume(state);
+ return repeated;
+}
+function recoverInterruptedAgentTool(state){
+ if(state.pendingToolStatus!=="running"||!Array.isArray(state.pendingToolCalls))return;
+ const index=Number(state.pendingToolIndex)||0,call=state.pendingToolCalls[index];
+ if(!call)return;
+ const name=call.function?.name||"unknown_tool",id=call.id||("vc-tool-"+(state.turns||0)+"-"+index);
+ state.history.push({role:"tool",tool_call_id:id,name,content:"Tool outcome unknown: the browser was interrupted while this tool was running. It was not replayed automatically to avoid duplicating a file write or other side effect. Inspect the current project state before deciding whether to run it again."});
+ state.used.push(name+" outcome unknown · inspect before retrying");
+ state.pendingToolIndex=index+1;state.pendingToolStatus="";state.pendingCurrentTool=null;
+ saveAgentResume(state);
+}
 async function runAgentLoop(state,spinner){
  const provider=byId(state.providerId);if(!provider)throw new Error("The provider used by this task is no longer saved. Select it again and resend the request.");
- const startStep=state.step||0;let answer="",finished=false;
- for(let n=startStep;n<startStep+24;n++){
+ state.turns=Number.isFinite(state.turns)?state.turns:(Number(state.step)||0);
+ state.step=state.turns;
+ state.turnBudget=Math.max(1,Number(state.turnBudget)||AGENT_MAX_TURNS_PER_RUN);
+ state.toolCalls=Number(state.toolCalls)||0;
+ state.toolBudget=Math.max(1,Number(state.toolBudget)||AGENT_MAX_TOOL_CALLS_PER_RUN);
+ state.used=Array.isArray(state.used)?state.used:[];
+ state.emptyResponses=Number(state.emptyResponses)||0;
+ recoverInterruptedAgentTool(state);
+ let answer="",finished=false,pauseReason="";
+ while(state.turns<state.turnBudget&&state.toolCalls<state.toolBudget){
   if(controller?.signal.aborted)throw new DOMException("Request stopped.","AbortError");
-  setAgentProgress("Waiting for model · step "+(n+1)+" of "+(startStep+24));
-  saveAgentResume({...state,step:n});
+  if(state.pendingToolCalls?.length){
+   const repeated=await executePendingAgentTools(state);
+   if(repeated){pauseReason="repeat";break}
+  }
+  let historySize=0;try{historySize=JSON.stringify(state.history).length}catch{}
+  if(state.history.length>70||historySize>420000)compactAgentHistory(state,true);
+  const turn=state.turns+1;
+  setAgentProgress("Waiting for model · turn "+turn+" / "+state.turnBudget);
+  state.turns=turn;state.step=turn;state.pauseReason="";
+  saveAgentResume(state);
   const streamBody={model:state.model,messages:state.history,temperature:.7,tools:buildAgentTools(),tool_choice:"auto"};
   let msg;
   try{
@@ -691,45 +778,41 @@ async function runAgentLoop(state,spinner){
    if(msg?.content)updateAgentLive("content",{content:msg.content});
   }
   if(!msg)throw new Error("Provider returned an empty response.");
+  state.history.push(msg);
+  saveAgentResume(state);
   if(Array.isArray(msg.tool_calls)&&msg.tool_calls.length){
-   state.history.push(msg);
-   for(let index=0;index<msg.tool_calls.length;index++){
-    const call=msg.tool_calls[index],name=call.function?.name||"unknown_tool",id=call.id||("vc-tool-"+Date.now()+"-"+index);
-    let args={};
-    try{args=JSON.parse(call.function?.arguments||"{}")}catch(error){
-     state.used.push(name+" · invalid arguments");
-     state.history.push({role:"tool",tool_call_id:id,name,content:"Tool error: Invalid JSON arguments. "+error.message});
-     continue;
-    }
-    setAgentProgress("Running tool · "+name);
-    updateAgentLive("tool",{name});
-    let output="",failed=false;
-    try{
-     output=await runTool(name,args);
-     if(typeof output==="string"&&output.startsWith("User declined"))state.used.push(name+" declined");
-     else{
-      if(typeof output==="string"&&/^Command failed with exit code|^Tool error:|^Error:/i.test(output))throw new Error(output);
-      state.used.push(name+" ✓");
-     }
-    }catch(error){
-     failed=true;output="Tool error: "+(error.message||String(error));state.used.push(name+" failed");
-    }
-    state.history.push({role:"tool",tool_call_id:id,name,content:String(output).slice(0,30000)});
-    updateAgentLive("tool_result",{name,failed,detail:String(output).slice(0,180)});
-    saveAgentResume({...state,step:n+1});
-    setAgentProgress((failed?"Tool failed · ":"Completed tool · ")+name);
-   }
+   state.pendingToolCalls=msg.tool_calls;
+   state.pendingToolIndex=0;
+   state.pendingToolStatus="";
+   state.pendingCurrentTool=null;
+   saveAgentResume(state);
+   const repeated=await executePendingAgentTools(state);
+   if(repeated){pauseReason="repeat";break}
    continue;
   }
-  answer=typeof msg.content==="string"?msg.content:"";finished=true;break;
+  answer=typeof msg.content==="string"?msg.content:"";
+  if(answer.trim()){finished=true;break}
+  state.emptyResponses++;
+  state.history.push({role:"user",content:"Your previous response was empty and contained no tool calls. Continue the original task. Do not claim completion unless it is actually complete; otherwise continue with the next useful action."});
+  saveAgentResume(state);
+  if(state.emptyResponses>=2){pauseReason="empty";break}
+ }
+ if(!finished&&!pauseReason){
+  pauseReason=(state.turns>=state.turnBudget||state.toolCalls>=state.toolBudget)?"budget":"safety";
  }
  spinner?.remove();
  if(finished){
   clearAgentResume();
-  addMessage("assistant",answer||"The model returned an empty final response after completing its tool cycle.",{model:state.model,toolLog:state.used.length?"Tool execution: "+state.used.join(" · "):""});
+  addMessage("assistant",answer,{model:state.model,toolLog:state.used.length?"Tool execution: "+state.used.join(" · "):""});
  }else{
-  saveAgentResume({...state,step:startStep+24});
-  addMessage("assistant","**Task paused — continuation is available.**\n\nThe agent used this execution cycle without producing a final answer. Conversation and tool results were preserved. Press **Continue task** to resume from the saved step.",{model:state.model,toolLog:state.used.length?"Tool execution: "+state.used.join(" · "):"",canContinue:true});
+  state.pauseReason=pauseReason;
+  saveAgentResume(state);
+  let pauseText="";
+  if(pauseReason==="repeat")pauseText="**Agent paused to prevent a tool loop.** The same tool call with identical inputs returned the same result three times in a row. Review the execution log; the agent can continue after this checkpoint, but it should inspect the current state and choose a different action.";
+  else if(pauseReason==="empty")pauseText="**Agent paused because the model returned empty responses twice.** The task and tool results are saved. Continue after checking the provider/model response.";
+  else if(pauseReason==="budget")pauseText="**Long-running task checkpoint reached — the task is not marked complete.** This run used its safety budget of "+state.turnBudget+" model turns or "+state.toolBudget+" tool calls. Press **Continue task** to add another 500 model turns and 2,000 tool calls without losing the saved history.";
+  else pauseText="**Agent paused at a safety checkpoint.** The task and completed tool results are saved. Press **Continue task** to resume.";
+  addMessage("assistant",pauseText,{model:state.model,toolLog:state.used.length?"Tool execution: "+state.used.join(" · "):"",canContinue:true});
  }
 }
 async function send(text,attachments=[]){
