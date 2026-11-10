@@ -226,7 +226,7 @@ class FrontendBundleTests(unittest.TestCase):
     def test_chat_switch_and_delete_are_blocked_during_active_response(self):
         root = Path(__file__).resolve().parents[1]
         app = (root / "app.js").read_text(encoding="utf-8")
-        self.assertIn("if(busy&&chatIdToDelete===chatId)", app)
+        self.assertIn('if(busy){toast("Wait for the active response to finish or stop it before deleting chats.");return}', app)
         self.assertIn("before starting a new chat", app)
         self.assertIn("before switching chats", app)
 
