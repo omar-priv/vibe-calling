@@ -248,6 +248,7 @@ function addMessage(role,content,extra={}){const c=current();if(!c)return;c.mess
 function deleteChat(chatIdToDelete){
  const target=chats.find(chat=>chat.id===chatIdToDelete);
  if(!target)return;
+ if(busy&&chatIdToDelete===chatId){toast("Stop the active task before deleting its conversation.");return;}
  if(!confirm("Delete this conversation permanently?\n\n"+(target.title||"Conversation")))return;
  chats=chats.filter(chat=>chat.id!==chatIdToDelete);
  if(pendingAgentRun?.chatId===chatIdToDelete)clearAgentResume();
@@ -1022,7 +1023,7 @@ document.addEventListener("click",e=>{
 document.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
 if(b.id==="stopAgentBtn"){controller?.abort();setAgentProgress("Stopping after the active request…");return}
 if(b.dataset.continue!==undefined){continueAgentRun();return}
-if(b.id==="newChatBtn"){newChat();return}
+if(b.id==="newChatBtn"){if(busy){toast("Wait for the current response to finish before starting a new chat.");return}newChat();return}
 if(b.id==="welcomeAddProvider"||b.id==="addProviderBtn"){openProvider();return}
 if(b.id==="openSettings"||b.id==="settingsShortcut"){setView("settings");return}
 if(b.id==="mobileMenu"){$("#sidebar").classList.toggle("open");return}
@@ -1049,7 +1050,7 @@ if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem
 if(b.id==="chatOptions"){toast("More options coming soon.");return}
 if(b.dataset.view){setView(b.dataset.view);return}
 if(b.dataset.close){$("#"+b.dataset.close)?.close();return}
-if(b.dataset.chat){chatId=b.dataset.chat;renderChat();renderHistory();setView("chat");return}
+if(b.dataset.chat){if(busy){toast("Wait for the current response to finish before switching chats.");return}chatId=b.dataset.chat;renderChat();renderHistory();setView("chat");return}
 if(b.dataset.edit){openProvider(b.dataset.edit);return}
 if(b.dataset.delete){if(confirm("Delete this provider and saved key?")){providers=providers.filter(p=>p.id!==b.dataset.delete);saveProviders();toast("Provider deleted")}return}
 if(b.dataset.refresh){refresh(b.dataset.refresh);return}
