@@ -128,6 +128,19 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertIn("agentLiveReasoning", html)
         self.assertIn("agentLivePlan", html)
 
+    def test_long_running_agent_has_persistent_checkpoints_and_loop_guards(self):
+        root = Path(__file__).resolve().parents[1]
+        app = (root / "app.js").read_text(encoding="utf-8")
+        self.assertIn("AGENT_MAX_TURNS_PER_RUN=500", app)
+        self.assertIn("AGENT_MAX_TOOL_CALLS_PER_RUN=2000", app)
+        self.assertIn("localStorage.setItem(AGENT_RESUME_KEY", app)
+        self.assertIn("recoverInterruptedAgentTool", app)
+        self.assertIn("state.repeatStreak>=2", app)
+        self.assertIn("AUTOMATIC WORK LOG CHECKPOINT", app)
+        self.assertIn("Resume saved task", app)
+        self.assertNotIn("startStep+24", app)
+        self.assertNotIn("n<startStep+24", app)
+
     def test_new_workspace_tools_are_registered(self):
         root = Path(__file__).resolve().parents[1]
         app = (root / "app.js").read_text(encoding="utf-8")
@@ -137,7 +150,7 @@ class FrontendBundleTests(unittest.TestCase):
             "workspace_preview", "workspace_start_project", "workspace_stop_project",
             "workspace_project_status", "workspace_read_memory", "workspace_update_memory",
             "runAgentLoop", "relevantSkillInstructions", "saveAgentResume", "continueAgentRun",
-            "sessionStorage", "workspace_start_project", "workspace_stop_project",
+            "localStorage", "sessionStorage", "workspace_start_project", "workspace_stop_project",
             "workspace_read_memory", "workspace_update_memory",
             "if(data.exit_code!==0)", "skill_list", "skill_read", "workspace_download_file",
             "upload_attachment", "read_attachment_base64", "connectGitHubMcp",
