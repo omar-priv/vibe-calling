@@ -246,6 +246,7 @@ async function testProvider(){
 }
 function addMessage(role,content,extra={}){const c=current();if(!c)return;c.messages.push({role,content,...extra});if(role==="user"&&c.title==="New conversation")c.title=content.slice(0,42)+(content.length>42?"…":"");saveChats();renderChat()}
 function deleteChat(chatIdToDelete){
+ if(busy){toast("Wait for the active response to finish or stop it before deleting chats.");return}
  const target=chats.find(chat=>chat.id===chatIdToDelete);
  if(!target)return;
  if(busy&&chatIdToDelete===chatId){toast("Stop the active task before deleting its conversation.");return;}
@@ -1044,7 +1045,7 @@ if(b.dataset.skillRead){readSkill(b.dataset.skillRead).then(content=>{const w=wi
 if(b.dataset.removeAttachment!==undefined){pendingAttachments.splice(Number(b.dataset.removeAttachment),1);renderPendingAttachments();return}
 if(b.id==="previewProjectBtn"){(async()=>{const tab=window.open("about:blank","_blank");try{if(!activeProject)throw Error("Select a project first.");const data=await workspaceRequest({action:"preview",project:activeProject});if(tab)tab.location=data.url;else toast(data.url)}catch(error){if(tab)tab.close();toast(error.message)}})();return}
 if(b.dataset.deleteChat){deleteChat(b.dataset.deleteChat);return}
-if(b.id==="clearHistory"){if(confirm("Clear all conversations?")){clearAgentResume();chats=[];chatId=null;saveChats();renderChat()}return}
+if(b.id==="clearHistory"){if(busy){toast("Wait for the active response to finish or stop it before clearing chat history.");return}if(confirm("Clear all conversations?")){clearAgentResume();chats=[];chatId=null;saveChats();renderChat()}return}
 if(b.id==="clearAll"){$("#confirmDialog").showModal();return}
 if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));try{sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}clearAgentResume();providers=[];chats=[];notes=[];chatId=null;remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};remoteMcpTools=[];remoteMcpToolMap={};$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
 if(b.id==="chatOptions"){toast("More options coming soon.");return}
