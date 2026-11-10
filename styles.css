@@ -1045,3 +1045,24 @@ body {
  .agent-live-head strong {min-width:60%}
  #agentReasoningText,#agentLivePlanText {max-height:140px}
 }
+
+
+/* Research mode and individual conversation controls */
+.history-entry{display:flex;align-items:center;gap:4px;min-width:0;width:100%}
+.history-entry .history-item{flex:1;min-width:0;width:0}
+.history-delete{flex:0 0 27px;width:27px;height:27px;border:1px solid transparent;border-radius:7px;background:transparent;color:#77849b;font-size:16px;line-height:1;opacity:.68;cursor:pointer}
+.history-delete:hover,.history-delete:focus-visible{border-color:#744453;background:#321d2a;color:#ff9cab;opacity:1}
+.history-entry:hover .history-delete{opacity:1}
+.research-mode-control{display:inline-flex;align-items:center;gap:7px;min-height:30px;padding:4px 8px;border:1px solid #35475e;border-radius:8px;background:#172334;color:#aebbd0;font-size:9px;white-space:nowrap}
+.research-mode-control select{max-width:132px;min-width:92px;border:0;outline:0;background:transparent;color:#e5eaf4;font:inherit;font-size:9px;cursor:pointer}
+.research-mode-control option{background:#121c2a;color:#e5eaf4}
+.composer-tools{flex-wrap:wrap}
+.history-delete:focus-visible,.research-mode-control:focus-within{outline:2px solid #9c91ff;outline-offset:2px}
+@media (hover:none){.history-delete{opacity:1}}
+@media (max-width:620px){
+ .composer-tools{gap:6px}
+ .composer-hint{display:none}
+ .research-mode-control{font-size:8px;padding:4px 6px}
+ .research-mode-control select{max-width:116px;min-width:86px}
+ .history-delete{opacity:1}
+}

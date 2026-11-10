@@ -38,3 +38,28 @@ These public agent-skill references were fetched and inspected before the interf
 ## Verification status
 
 JavaScript syntax and required UI element IDs are checked before each release. Manual browser click-through and live provider requests still need to be exercised on the user's computer and network; syntax checks alone are not described as proof of runtime success.
+
+
+## Debugging, code review, and research references added
+
+6. **Systematic debugging — obra/superpowers**
+   - https://github.com/obra/superpowers/tree/main/skills/systematic-debugging
+   - Used for root-cause-first investigation, falsifiable hypotheses, one-variable experiments, and regression tests. The repository LICENSE was inspected and identified as MIT. The skill was rewritten in the project's own wording rather than copied verbatim.
+
+7. **Code review and quality — Addy Osmani**
+   - https://github.com/addyosmani/agent-skills/tree/main/skills/code-review-and-quality
+   - Used for five review axes: correctness, readability, architecture, security, and performance; findings should include location, evidence, impact, and a structural remedy. The repository LICENSE was inspected and identified as MIT.
+
+8. **Web Interface Guidelines — Vercel**
+   - https://github.com/vercel-labs/agent-skills/tree/main/skills/web-design-guidelines
+   - Used as a checklist source for semantic controls, keyboard focus, form errors, reduced motion, responsive states, and direct guideline refresh. The project's skill content was rewritten as local guidance; the Vercel skill points to the separately maintained Web Interface Guidelines source.
+
+9. **UX usability foundations — hueyexe**
+   - https://github.com/hueyexe/frontend-agent-skills/tree/main/ux-usability-foundations
+   - Used for user-journey mapping, discoverability, task feedback, recovery, and practical prioritization.
+
+10. **Interface review — jakubkrehel/skills**
+    - https://github.com/jakubkrehel/skills
+    - Used as an additional perspective for interface critique, accessibility, hierarchy, and interaction clarity.
+
+The Debugging, Code Review, Frontend Design, UX Review, and Web Research instructions in this repository were expanded using these principles in original wording. A separate deep-research skill was added for multi-query investigations, primary-source prioritization, date awareness, cross-checking, and evidence synthesis.

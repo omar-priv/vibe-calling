@@ -1,23 +1,27 @@
 ---
 name: UX Review
-description: Audit workflows, information architecture, interaction friction, and interface consistency before changing UI code.
+description: Audit complete user journeys for clarity, discoverability, feedback, accessibility, recovery, and interaction friction.
 ---
-# UX Review
 
-## Audit process
-1. Map the primary user journeys from entry to successful completion.
-2. Identify the user goal, available action, feedback, error recovery, and exit path for every important screen.
-3. Check hierarchy, labels, empty/loading/error/success states, keyboard flow, responsive layout, and content density.
-4. Prioritize issues by user impact and frequency; distinguish blockers from polish.
-5. Recommend the smallest coherent set of changes that removes friction without disrupting familiar behavior.
-6. Implement only after tracing the relevant HTML, CSS, JavaScript, and event handlers.
-7. Re-check the same journeys after changes.
+# UX review
 
-## Deliverable
-For each issue include: location, observed behavior, user impact, severity, proposed fix, and verification method.
+## Map the journey
+For the requested feature, map the steps from entry to successful completion. For each step identify:
+- The user's goal and the action they need.
+- Whether the action is discoverable and correctly named.
+- What feedback appears immediately and what happens on success or failure.
+- How the user recovers, cancels, goes back, or exits.
 
-## Guardrails
-- Do not call a preference a usability defect without explaining the task impact.
-- Avoid decorative controls that do nothing.
-- Preserve working keyboard and mobile behavior.
-- Do not claim user testing unless actual users were observed.
+## Review the workflow
+- Check information architecture, navigation consistency, terminology, and whether the primary action is obvious.
+- Check loading, empty, partial, success, error, disabled, permission-denied, and offline states.
+- Check keyboard flow, visible focus, screen-reader labels/status, contrast, touch targets, and narrow screens.
+- Check data loss risk, destructive confirmations, undo/recovery, duplicate actions, and whether progress survives reloads where promised.
+- Avoid decorative or inert controls. Every visible action must work or be clearly marked unavailable/planned.
+- Do not confuse personal preference with a usability defect; explain the task impact.
+
+## Prioritization
+Rank by how much the issue blocks the user's goal, how frequently it occurs, and how many screens it affects. Prefer one systemic fix over multiple cosmetic patches.
+
+## Verification
+Re-run the same journey after implementation. Check desktop and mobile widths, keyboard-only operation, and failure recovery where practical. Never claim usability testing unless actual users were observed.
