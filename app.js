@@ -4,6 +4,9 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const KEYS={providers:"vc_providers_v1",chats:"vc_chats_v1",notes:"vc_notes_v1",mcp:"vc_github_mcp_v1",remoteMcp:"vc_remote_mcp_v1"};
 const AGENT_RESUME_KEY="vc_agent_resume_v1";
+const AGENT_MAX_TURNS_PER_RUN=500;
+const AGENT_MAX_TOOL_CALLS_PER_RUN=2000;
+const AGENT_RESUME_MAX_CHARS=2500000;
 const presets={custom:{name:"Custom provider",url:"",model:""},nvidia:{name:"NVIDIA NIM",url:"https://integrate.api.nvidia.com/v1",model:""},gemini:{name:"Google Gemini",url:"https://generativelanguage.googleapis.com/v1beta/openai",model:""},openai:{name:"OpenAI",url:"https://api.openai.com/v1",model:"gpt-4o-mini"},openrouter:{name:"OpenRouter",url:"https://openrouter.ai/api/v1",model:""},groq:{name:"Groq",url:"https://api.groq.com/openai/v1",model:""}};
 const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
 let providers=read(KEYS.providers,[]),chats=read(KEYS.chats,[]),notes=read(KEYS.notes,[]);
@@ -13,7 +16,11 @@ let mcpConfig=read(KEYS.mcp,{token:"",readOnly:true,sessionId:"",connected:false
 if(!mcpConfig||typeof mcpConfig!=="object")mcpConfig={token:"",readOnly:true,sessionId:"",connected:false};
 let githubMcpTools=[],githubMcpToolMap={},remoteMcpTools=[],remoteMcpToolMap={},skillCatalog=[],pendingAttachments=[];
 let pendingAgentRun=null;
-try{pendingAgentRun=JSON.parse(sessionStorage.getItem(AGENT_RESUME_KEY)||"null")}catch{pendingAgentRun=null}
+try{
+ const savedAgentState=localStorage.getItem(AGENT_RESUME_KEY)||sessionStorage.getItem(AGENT_RESUME_KEY);
+ pendingAgentRun=savedAgentState?JSON.parse(savedAgentState):null;
+ if(pendingAgentRun&&!localStorage.getItem(AGENT_RESUME_KEY))localStorage.setItem(AGENT_RESUME_KEY,savedAgentState);
+}catch{pendingAgentRun=null}
 let remoteMcpConfig=read(KEYS.remoteMcp,{name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false});
 if(!remoteMcpConfig||typeof remoteMcpConfig!=="object")remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};
 const uid=()=>globalThis.crypto?.randomUUID?.()||("vc-"+Date.now()+"-"+Math.random().toString(36).slice(2));
@@ -83,6 +90,10 @@ function renderChat(){
   (user?"":'<div class="message-actions"><button type="button" data-copy="'+esc(m.content||"")+'">Copy</button><button type="button" data-retry="'+i+'">Regenerate</button>'+(m.canContinue?'<button type="button" class="continue-agent" data-continue="1">Continue task ↻</button>':"")+'</div>')+
   '</div></article>';
  }).join("");
+ if(pendingAgentRun&&pendingAgentRun.chatId===chatId&&!arr.some(m=>m.canContinue)){
+  const turns=Number(pendingAgentRun.turns??pendingAgentRun.step??0),budget=Number(pendingAgentRun.turnBudget||AGENT_MAX_TURNS_PER_RUN);
+  box.insertAdjacentHTML("beforeend",'<article class="message assistant"><div class="message-avatar">✳</div><div class="message-body"><div class="message-content"><p><b>A saved Agent task is available.</b><br>It has completed '+turns+' model turns. Resume it to continue from the saved checkpoint.</p><button type="button" class="continue-agent" data-continue="1">Resume saved task ↻</button></div></div></article>');
+ }
  if(nearBottom)chatBox.scrollTo(0,chatBox.scrollHeight);
 }
 function openProvider(providerId){pendingModels=[];editingId=providerId||null;const p=providerId?byId(providerId):null;pendingFreeSource=p?.freeModelSource||"";$("#providerDialogTitle").textContent=p?"Edit provider":"Add a provider";$("#providerPreset").value="custom";$("#providerName").value=p?.name||"";$("#providerUrl").value=p?.baseUrl||"";$("#providerKey").value=p?.apiKey||"";$("#providerModel").value=p?.defaultModel||"";$("#providerHeader").value=p?.customHeader||"";$("#providerHeaderValue").value=p?.customHeaderValue||"";$("#providerFeedback").textContent="";$("#providerFeedback").className="feedback";$("#providerDialog").showModal()}
@@ -591,11 +602,51 @@ async function buildHistoryWithAttachments(messages,systemMessage){
  return history;
 }
 function setAgentProgress(message){const el=$("#agentProgress");if(el)el.textContent=message||""}
+function agentHistoryCheckpointLine(message){
+ if(message.role==="tool")return "[TOOL RESULT · "+(message.name||"tool")+"] "+String(message.content||"").slice(0,420);
+ if(Array.isArray(message.tool_calls))return "[MODEL TOOL REQUESTS] "+message.tool_calls.map(call=>(call.function?.name||"tool")+" "+String(call.function?.arguments||"{}").slice(0,260)).join(" | ");
+ let content=message.content;
+ if(Array.isArray(content))content=content.map(part=>part.type==="text"?part.text:"[image attachment omitted from compacted history; use the saved attachment if needed]").join("\n");
+ return "["+String(message.role||"message").toUpperCase()+"] "+String(content||"").slice(0,650);
+}
+function compactAgentHistory(state,aggressive=false){
+ const history=Array.isArray(state.history)?state.history:[];
+ if(history.length<34)return false;
+ let cut=Math.max(1,history.length-(aggressive?18:34));
+ while(cut<history.length&&history[cut]?.role==="tool")cut++;
+ if(cut<=1)return false;
+ const checkpoint=history.slice(1,cut).map(agentHistoryCheckpointLine).join("\n").slice(-16000);
+ const prior=state.historySummary?state.historySummary+"\n\n":"";
+ state.historySummary=(prior+checkpoint).slice(-20000);
+ state.history=[history[0],{role:"user",content:"AUTOMATIC WORK LOG CHECKPOINT — earlier conversation and tool results were compacted to keep the task running. This is a factual activity log, not a claim that the work is complete. Re-open files and verify current project state before relying on old details. Continue the original task and keep the project memory updated.\n\n"+state.historySummary},...history.slice(cut)];
+ state.compactions=(Number(state.compactions)||0)+1;
+ return true;
+}
 function saveAgentResume(state){
  pendingAgentRun=state;
- try{const encoded=JSON.stringify(state);if(encoded.length<=1200000)sessionStorage.setItem(AGENT_RESUME_KEY,encoded);else sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}
+ try{
+  let encoded=JSON.stringify(state);
+  if(encoded.length>AGENT_RESUME_MAX_CHARS||state.history?.length>80){
+   compactAgentHistory(state,true);
+   encoded=JSON.stringify(state);
+  }
+  if(encoded.length>AGENT_RESUME_MAX_CHARS){
+   compactAgentHistory(state,true);
+   encoded=JSON.stringify(state);
+  }
+  if(encoded.length<=AGENT_RESUME_MAX_CHARS){
+   localStorage.setItem(AGENT_RESUME_KEY,encoded);
+   try{sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}
+   return;
+  }
+ }catch{}
+ try{sessionStorage.setItem(AGENT_RESUME_KEY,JSON.stringify(state))}catch{}
 }
-function clearAgentResume(){pendingAgentRun=null;try{sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}}
+function clearAgentResume(){
+ pendingAgentRun=null;
+ try{localStorage.removeItem(AGENT_RESUME_KEY)}catch{}
+ try{sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}
+}
 function makeAgentSpinner(){
  const spinner=document.createElement("section");spinner.className="agent-running";
  spinner.innerHTML='<div class="agent-live-head"><span class="typing-dots"><i></i><i></i><i></i></span><strong id="agentProgress" aria-live="polite">Preparing the task…</strong><button type="button" id="stopAgentBtn" class="stop-agent">Stop</button></div><div class="agent-live-reasoning" id="agentLiveReasoning" hidden><span class="agent-live-label">MODEL REASONING SUMMARY</span><div id="agentReasoningText"></div></div><div class="agent-live-plan" id="agentLivePlan" hidden><span class="agent-live-label">LIVE RESPONSE / PLAN</span><div id="agentLivePlanText"></div></div><div class="agent-live-tools" id="agentLiveTools"><span class="agent-live-label">EXECUTION LOG</span><ol id="agentLiveToolList"></ol></div>';
