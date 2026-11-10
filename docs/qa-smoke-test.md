@@ -85,3 +85,17 @@ Automated Python/Node checks and browser interactions must be reported from the 
 6. Confirm each actual tool call appears in the execution log and changes to completed/failed when the tool returns.
 7. Confirm Stop cancels an in-flight stream, Continue task still resumes a paused task, and the final assistant answer is displayed normally.
 8. Repeat with a provider that does not support streaming; verify a clear error or JSON compatibility fallback and no false claim of live reasoning.
+
+
+## Long-running Agent runtime smoke test
+
+1. Start an Agent task that requires multiple inspect/edit/test tool calls and confirm it continues beyond the former 24-turn limit without showing a manual Continue prompt at turn 24.
+2. Confirm the progress label counts model turns and tool calls, and that streamed plans and real tool execution results continue to appear.
+3. Confirm the same identical tool request/result repeating four times within a rolling window of 12 tool calls pauses the Agent with a loop-prevention notice.
+4. Confirm two empty model responses pause the task rather than being presented as success.
+5. Reload the same localhost origin/port while a task checkpoint exists; confirm the task's conversation is selected and a Resume saved task action appears.
+6. Resume the task and confirm it continues from the saved history. On the 500-turn or 2,000-tool-call budget checkpoint, Continue task must add another 500 turns and 2,000 tool calls.
+7. Interrupt the browser while a tool is executing. On resume, confirm that the uncertain tool is not automatically replayed and that the model is told to inspect the project state first.
+8. Confirm that closing the browser pauses execution; Vibe Calling is not a background worker and does not execute while the browser is closed.
+
+Automated CI validates syntax and static safety checks. Live provider behavior, browser reload behavior, and the long-run smoke test above still require manual validation with a configured provider.
