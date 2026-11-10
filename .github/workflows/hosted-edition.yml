@@ -17,6 +17,8 @@ jobs:
           python-version: "3.11"
       - name: Compile Python files
         run: python -m py_compile server.py hosted_server.py
+      - name: Test hosted authentication
+        run: python -m unittest discover -s tests -p "test_hosted_*.py" -v
       - name: Validate deployment files
         run: |
           python - <<'PY'
