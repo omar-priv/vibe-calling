@@ -2,7 +2,7 @@
 (() => {
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const KEYS={providers:"vc_providers_v1",chats:"vc_chats_v1",notes:"vc_notes_v1",mcp:"vc_github_mcp_v1",remoteMcp:"vc_remote_mcp_v1"};
+const KEYS={providers:"vc_providers_v1",chats:"vc_chats_v1",notes:"vc_notes_v1",mcp:"vc_github_mcp_v1",remoteMcp:"vc_remote_mcp_v1",researchMode:"vc_research_mode_v1"};
 const AGENT_RESUME_KEY="vc_agent_resume_v1";
 const AGENT_MAX_TURNS_PER_RUN=500;
 const AGENT_MAX_TOOL_CALLS_PER_RUN=2000;
@@ -10,6 +10,8 @@ const AGENT_RESUME_MAX_CHARS=2500000;
 const presets={custom:{name:"Custom provider",url:"",model:""},nvidia:{name:"NVIDIA NIM",url:"https://integrate.api.nvidia.com/v1",model:""},gemini:{name:"Google Gemini",url:"https://generativelanguage.googleapis.com/v1beta/openai",model:""},openai:{name:"OpenAI",url:"https://api.openai.com/v1",model:"gpt-4o-mini"},openrouter:{name:"OpenRouter",url:"https://openrouter.ai/api/v1",model:""},groq:{name:"Groq",url:"https://api.groq.com/openai/v1",model:""}};
 const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
 let providers=read(KEYS.providers,[]),chats=read(KEYS.chats,[]),notes=read(KEYS.notes,[]);
+let researchMode=read(KEYS.researchMode,"off");
+if(!["off","web","deep"].includes(researchMode))researchMode="off";
 if(!Array.isArray(providers))providers=[];if(!Array.isArray(chats))chats=[];if(!Array.isArray(notes))notes=[];
 let chatId=chats[0]?.id||null,editingId=null,busy=false,controller=null,pendingModels=[],pendingFreeSource="";
 let mcpConfig=read(KEYS.mcp,{token:"",readOnly:true,sessionId:"",connected:false});
