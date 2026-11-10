@@ -196,6 +196,7 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertIn('id="researchMode"', html)
         self.assertIn('function deleteChat(chatIdToDelete)', app)
         self.assertIn('data-delete-chat=', app)
+        self.assertIn("if(busy){toast(\"Wait for the active response to finish or stop it before deleting chats.")", app)
         self.assertIn('toolDef("web_search"', app)
         self.assertIn('toolDef("web_open"', app)
         self.assertIn("buildResearchSystemPrompt", app)
