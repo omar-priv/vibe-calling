@@ -96,6 +96,9 @@ class HostedHandler(core.Handler):
         if not _valid_session(self):
             self._redirect_login()
             return
+        if path.startswith("/__project_preview/"):
+            self._proxy_project_preview(path)
+            return
         if path.startswith("/projects/"):
             try:
                 relative = path[len("/projects/"):]
@@ -157,10 +160,15 @@ class HostedHandler(core.Handler):
                 if isinstance(payload, dict) and payload.get("action") == "preview":
                     project = payload.get("project", "")
                     core.project_dir(project)
-                    relative = f"/projects/{project}/index.html"
-                    if not (core.WORKSPACE_ROOT / project / "index.html").is_file():
-                        raise ValueError("This project has no index.html for static preview.")
-                    self.send_json(200, {"ok": True, "kind": "static", "path": relative, "url": relative})
+                    status = core.project_server_status(project)
+                    if status.get("running"):
+                        relative = f"/__project_preview/{project}/"
+                        self.send_json(200, {"ok": True, "kind": "development-server", "url": relative, **status})
+                    else:
+                        relative = f"/projects/{project}/index.html"
+                        if not (core.WORKSPACE_ROOT / project / "index.html").is_file():
+                            raise ValueError("This project has no index.html. Start a supported dev server or add index.html.")
+                        self.send_json(200, {"ok": True, "kind": "static", "path": relative, "url": relative})
                 else:
                     self.handle_workspace(payload)
             elif route == "/api/skills":
@@ -179,6 +187,38 @@ class HostedHandler(core.Handler):
             self.send_json(502, {"error": "Hosted operation failed: " + str(exc), "code": "HOSTED_OPERATION_ERROR", "retryable": True})
         except Exception:
             self.send_json(500, {"error": "Unexpected hosted server error.", "code": "INTERNAL_ERROR"})
+
+    def _proxy_project_preview(self, request_path):
+        try:
+            remainder = request_path[len("/__project_preview/"):]
+            project, _, asset_path = remainder.partition("/")
+            core.project_dir(project)
+            status = core.project_server_status(project)
+            if not status.get("running"):
+                self.send_error(404, "Project preview is not running.")
+                return
+            port = int(urlsplit(status.get("url", "")).port or 0)
+            if not port:
+                self.send_error(502, "Project preview port is unavailable.")
+                return
+            target_path = "/" + asset_path
+            query = urlsplit(self.path).query
+            target_url = f"http://127.0.0.1:{port}{target_path}" + (("?" + query) if query else "")
+            import urllib.request
+            request = urllib.request.Request(target_url, headers={"User-Agent": "VibeCallingPreview/1.0"}, method="GET")
+            with urllib.request.urlopen(request, timeout=20) as response:
+                data = response.read(8 * 1024 * 1024 + 1)
+                if len(data) > 8 * 1024 * 1024:
+                    self.send_error(502, "Preview asset exceeded 8 MB.")
+                    return
+                self.send_response(response.status)
+                self.send_header("Content-Type", response.headers.get("Content-Type", "application/octet-stream"))
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+        except (ValueError, OSError, TimeoutError) as exc:
+            self.send_error(502, "Project preview failed: " + str(exc))
 
     def _login(self):
         now = time.time()
@@ -222,7 +262,7 @@ def main():
     skills.mkdir(exist_ok=True)
     core.WORKSPACE_ROOT = projects
     core.USER_SKILLS_ROOT = skills
-    core.HOST = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "localhost")
+    core.HOST = "127.0.0.1"
     core.PORT = PORT
     httpd = ThreadingHTTPServer((BIND, PORT), HostedHandler)
     httpd.daemon_threads = True
