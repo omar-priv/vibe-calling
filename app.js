@@ -249,7 +249,6 @@ function deleteChat(chatIdToDelete){
  if(busy){toast("Wait for the active response to finish or stop it before deleting chats.");return}
  const target=chats.find(chat=>chat.id===chatIdToDelete);
  if(!target)return;
- if(busy&&chatIdToDelete===chatId){toast("Stop the active task before deleting its conversation.");return;}
  if(!confirm("Delete this conversation permanently?\n\n"+(target.title||"Conversation")))return;
  chats=chats.filter(chat=>chat.id!==chatIdToDelete);
  if(pendingAgentRun?.chatId===chatIdToDelete)clearAgentResume();
