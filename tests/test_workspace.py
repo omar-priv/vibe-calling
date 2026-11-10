@@ -235,6 +235,13 @@ class ResearchParsingTests(unittest.TestCase):
         self.assertEqual(parser.results[0]["title"], "Example result")
         self.assertIn("useful preview", parser.results[0]["snippet"])
 
+    def test_duckduckgo_parser_keeps_results_without_snippets(self):
+        parser = server.DuckDuckGoResultParser()
+        parser.feed('<a class="result__a" href="https://example.com/without-snippet">Title only</a>')
+        parser.close()
+        self.assertEqual(len(parser.results), 1)
+        self.assertEqual(parser.results[0]["snippet"], "")
+
     def test_research_page_parser_excludes_scripts_and_navigation(self):
         parser = server.ResearchPageParser()
         parser.feed(
