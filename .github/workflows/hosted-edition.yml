@@ -31,7 +31,7 @@ jobs:
           missing = [item for item in required if item not in render]
           if missing:
               raise SystemExit("Missing Render settings: " + ", ".join(missing))
-          assert "127.0.0.1" not in source
+          assert 'BIND = "0.0.0.0"' in source
           assert "HttpOnly" in source and "SameSite=Strict" in source
           print("Hosted deployment configuration checks passed.")
           PY
