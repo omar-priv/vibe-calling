@@ -1,5 +1,5 @@
 ---
-name: debugging
+name: Systematic Debugging
 description: Reproduce failures, trace state and data flow to the root cause, test one hypothesis at a time, and prevent regressions.
 ---
 
