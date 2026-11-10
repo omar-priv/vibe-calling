@@ -141,6 +141,11 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertIn("Resume saved task", app)
         self.assertNotIn("startStep+24", app)
         self.assertNotIn("n<startStep+24", app)
+        self.assertIn("while(true){", app)
+        self.assertIn("state.turnBudget=(", app)
+        self.assertIn("state.toolBudget=(", app)
+        self.assertIn("continuing autonomously", app)
+        self.assertNotIn('pauseReason==="budget"', app)
 
     def test_new_workspace_tools_are_registered(self):
         root = Path(__file__).resolve().parents[1]
