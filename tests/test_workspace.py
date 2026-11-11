@@ -2,6 +2,7 @@ import base64
 import io
 import re
 import tempfile
+import socket
 import threading
 import unittest
 import urllib.error
@@ -285,6 +286,60 @@ class ResearchParsingTests(unittest.TestCase):
     def test_research_result_rejects_plain_http_destination(self):
         self.assertEqual(server.normalize_research_result_url("http://example.com/article"), "")
 
+
+
+
+class PinnedHTTPSValidationTests(unittest.TestCase):
+    def test_resolver_rejects_private_addresses(self):
+        private_answer = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 443))]
+        with patch("server.socket.getaddrinfo", return_value=private_answer):
+            with self.assertRaisesRegex(ValueError, "non-public IP"):
+                server.resolve_public_addresses("example.com", 443)
+
+    def test_https_handler_revalidates_dns_before_opening_connection(self):
+        request = server.urllib.request.Request("https://example.com/v1/chat/completions")
+        private_answer = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("10.0.0.5", 443))]
+        handler = server.PinnedHTTPSHandler(context=server.ssl.create_default_context())
+        with patch("server.socket.getaddrinfo", return_value=private_answer):
+            with self.assertRaisesRegex(ValueError, "non-public IP"):
+                handler.https_open(request)
+
+    def test_connection_uses_only_the_validated_socket_address(self):
+        address_info = (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("93.184.216.34", 443))
+
+        class FakeSocket:
+            def __init__(self):
+                self.connected_to = None
+                self.closed = False
+            def settimeout(self, value):
+                pass
+            def connect(self, address):
+                self.connected_to = address
+            def close(self):
+                self.closed = True
+
+        class FakeTLSContext:
+            def wrap_socket(self, connection, server_hostname):
+                self.server_hostname = server_hostname
+                return connection
+
+        fake_socket = FakeSocket()
+        context = FakeTLSContext()
+        connection = server.PinnedHTTPSConnection(
+            "example.com", pinned_addresses=[address_info], context=context, timeout=3
+        )
+        with patch("server.socket.socket", return_value=fake_socket):
+            connection.connect()
+        self.assertEqual(fake_socket.connected_to, address_info[4])
+        self.assertEqual(context.server_hostname, "example.com")
+
+
+    def test_skills_document_has_valid_table_rows(self):
+        document = (Path(server.ROOT) / "docs" / "skills.md").read_text(encoding="utf-8")
+        self.assertNotIn("\\n|", document)
+        self.assertIn("| `coding-mentor` |", document)
+        self.assertIn("| `independent-code-review` |", document)
+        self.assertIn("| `code-review-agent` |")
 
 
 class PreviewIsolationTests(unittest.TestCase):

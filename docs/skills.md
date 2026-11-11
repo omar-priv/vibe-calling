@@ -23,7 +23,10 @@ The following 23 skills are bundled in the repository and available immediately 
 | `browser-visual-testing` | Verify real UI journeys and visual regressions in an actual browser |
 | `release-engineering` | Prepare safe GitHub releases using isolated branches, CI, diffs, and rollback plans |
 | `web-research` | Perform fast current lookups with source verification and citations |
-| `deep-research` | Conduct multi-angle investigations with primary sources, date checks, conflicting evidence, and traceable synthesis |\n| `coding-mentor` | Teach clean code and problem-solving incrementally when learning is the goal |\n| `independent-code-review` | Review existing code independently for correctness, security, errors, and maintainability |\n| `code-review-agent` | Run an adversarial second review for residual bugs, security flaws, and production risks |
+| `deep-research` | Conduct multi-angle investigations with primary sources, date checks, conflicting evidence, and traceable synthesis |
+| `coding-mentor` | Teach clean code and problem-solving incrementally when learning is the goal |
+| `independent-code-review` | Review existing code independently for correctness, security, errors, and maintainability |
+| `code-review-agent` | Run an adversarial second review for residual bugs, security flaws, and production risks |
 
 ## How the agent uses them
 

@@ -30,6 +30,7 @@ from urllib.parse import unquote, quote, urlencode, urljoin, parse_qs
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import functools
+import http.client
 from functools import wraps
 from urllib.parse import urlsplit
 
@@ -223,6 +224,21 @@ def json_bytes(value):
     return json.dumps(value, ensure_ascii=False).encode("utf-8")
 
 
+def resolve_public_addresses(host, port, purpose="remote HTTPS target"):
+    """Resolve once, reject non-public IPs, and return the exact addresses to pin."""
+    try:
+        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise ValueError(f"Could not resolve the {purpose} hostname: {exc}") from exc
+    if not addresses:
+        raise ValueError(f"The {purpose} hostname did not resolve to an IP address.")
+    for item in addresses:
+        ip = ipaddress.ip_address(item[4][0].split("%", 1)[0])
+        if not ip.is_global:
+            raise ValueError(f"The {purpose} hostname resolves to a non-public IP address; blocked for safety.")
+    return tuple(addresses)
+
+
 def validate_target(base_url):
     if not isinstance(base_url, str) or len(base_url) > 2048:
         raise ValueError("Invalid Base URL.")
@@ -241,19 +257,9 @@ def validate_target(base_url):
     if not (1 <= port <= 65535):
         raise ValueError("Invalid port in Base URL.")
 
-    # Resolve before making a request and reject private, loopback, link-local,
-    # reserved, or otherwise non-public destinations (basic SSRF protection).
-    try:
-        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise ValueError("Could not resolve the provider hostname: " + str(exc))
-    if not addresses:
-        raise ValueError("The provider hostname did not resolve to an IP address.")
-    for item in addresses:
-        ip = ipaddress.ip_address(item[4][0].split("%", 1)[0])
-        if not ip.is_global:
-            raise ValueError("Provider resolves to a non-public IP address; blocked for safety.")
-
+    # Early validation gives the user a useful error. The HTTPS handler resolves
+    # and pins the actual connection address again immediately before connecting.
+    resolve_public_addresses(host, port, "provider")
     # Preserve any API prefix in the Base URL, but discard an accidental known endpoint suffix.
     path = parts.path.rstrip("/")
     path = re.sub(r"/(models|chat/completions)$", "", path, flags=re.I)
@@ -279,16 +285,7 @@ def validate_research_url(url):
         port = parts.port or 443
     except ValueError:
         raise ValueError("Invalid port in research URL.")
-    try:
-        addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise ValueError("Could not resolve the research source hostname: " + str(exc))
-    if not addresses:
-        raise ValueError("The research source hostname did not resolve.")
-    for item in addresses:
-        ip = ipaddress.ip_address(item[4][0].split("%", 1)[0])
-        if not ip.is_global:
-            raise ValueError("Research source resolves to a private or non-public IP address; blocked.")
+    resolve_public_addresses(host, port, "research source")
     return parts
 
 
@@ -299,9 +296,6 @@ class ResearchRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         validate_research_url(urljoin(req.full_url, newurl))
         return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-RESEARCH_OPENER = urllib.request.build_opener(ResearchRedirectHandler())
 
 
 class DuckDuckGoResultParser(HTMLParser):
@@ -959,12 +953,78 @@ def run_project_command(project_id, command):
 
 
 
+
+class PinnedHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPS connection that uses only the already-validated DNS socket addresses."""
+
+    def __init__(self, host, *args, pinned_addresses, **kwargs):
+        self.pinned_addresses = tuple(pinned_addresses)
+        super().__init__(host, *args, **kwargs)
+
+    def connect(self):
+        if self._tunnel_host:
+            raise OSError("HTTPS proxy tunnels are disabled for pinned outbound requests.")
+        last_error = None
+        for family, socktype, proto, _canonname, sockaddr in self.pinned_addresses:
+            connection = socket.socket(family, socktype, proto)
+            try:
+                if self.timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+                    connection.settimeout(self.timeout)
+                if self.source_address:
+                    connection.bind(self.source_address)
+                connection.connect(sockaddr)
+            except OSError as exc:
+                last_error = exc
+                connection.close()
+                continue
+            try:
+                self.sock = self._context.wrap_socket(connection, server_hostname=self.host)
+            except Exception:
+                connection.close()
+                raise
+            return
+        raise OSError("Could not connect to any validated public IP address.") from last_error
+
+
+class PinnedHTTPSHandler(urllib.request.HTTPSHandler):
+    """Resolve and pin a public IP at the exact time each HTTPS request connects."""
+
+    def https_open(self, request):
+        parts = urlsplit(request.full_url)
+        host = (parts.hostname or "").rstrip(".").lower()
+        if parts.scheme.lower() != "https" or not host:
+            raise ValueError("Pinned outbound connections require an HTTPS hostname.")
+        try:
+            port = parts.port or 443
+        except ValueError as exc:
+            raise ValueError("Invalid port in outbound HTTPS URL.") from exc
+        addresses = resolve_public_addresses(host, port)
+        connection_factory = lambda request_host, **kwargs: PinnedHTTPSConnection(
+            request_host, pinned_addresses=addresses, **kwargs
+        )
+        return self.do_open(
+            connection_factory,
+            request,
+            context=self._context,
+            check_hostname=self._check_hostname,
+        )
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
 
-OPENER = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    NoRedirect,
+    PinnedHTTPSHandler(context=ssl.create_default_context()),
+)
+RESEARCH_OPENER = urllib.request.build_opener(
+    urllib.request.ProxyHandler({}),
+    ResearchRedirectHandler,
+    PinnedHTTPSHandler(context=ssl.create_default_context()),
+)
 
 
 class ProjectPreviewHandler(SimpleHTTPRequestHandler):
