@@ -314,16 +314,21 @@ async function readSkill(id){const data=await skillsRequest({action:"read",id});
 async function relevantSkillInstructions(prompt){
  const source=String(prompt||"").toLowerCase(),selected=[];
  const add=id=>{if(skillCatalog.some(skill=>skill.id===id)&&!selected.includes(id))selected.push(id)};
- if(/build|create|develop|implement|project|website|app|application|موقع|ابني|بناء|برمج/.test(source))add("project-planning");
- if(/website|web app|frontend|ui|design|html|css|react|موقع|واجهة|تصميم|تصميم واجهات|تجربة المستخدم|ux/.test(source)){add("frontend-design");add("ux-review");add("frontend-development")}
- if(/api|backend|server|database|خلفية|باك.?اند/.test(source))add("backend-development");
- if(/bug|error|fail|debug|fix|broken|مشكلة|خطأ|إصلاح|ديبق|تصحيح/.test(source)){add("debugging");add("code-review")}
- if(/review|code review|audit|مراجعة|راجع|تدقيق/.test(source))add("code-review");
+ const learnIntent=/learn|teach|explain|understand|practice|تعلم|علمني|علّم|اشرح|أفهم|تدرّب/.test(source);
+ const reviewIntent=/review|code review|audit|مراجعة|راجع|تدقيق/.test(source);
+ const fixIntent=/bug|error|fail|debug|fix|broken|مشكلة|خطأ|إصلاح|ديبق|تصحيح|صحح|زبط|صلح|عدّل|تحديث/.test(source);
+ const buildIntent=/build|create|develop|implement|project|website|app|application|موقع|واجهة|تصميم|مشروع|بناء|ابني|اشتغل|نفذ|برمج/.test(source);
+ if(learnIntent&&!buildIntent)add("coding-mentor");
+ if(reviewIntent){add("independent-code-review");add("code-review-agent")}
+ if(fixIntent)add("debugging");
+ if(buildIntent)add("project-planning");
  if(/security|secret|token|auth|permission|أمان|حماية/.test(source))add("security-review");
+ if(/website|web app|frontend|ui|design|html|css|react|موقع|واجهة|تصميم|تصميم واجهات|تجربة المستخدم|ux/.test(source)){add("frontend-design");add("ux-review");add("frontend-development")}
+ if(/api|backend|server|database|خلفية|باك.?اند/.test(source)){add("backend-design");add("backend-development")}
  if(!selected.length&&skillCatalog.length)add("project-planning");
  const loaded=[];
- for(const id of selected.slice(0,4)){
-  try{loaded.push("### Skill: "+id+"\n"+(await readSkill(id)).slice(0,14000))}
+ for(const id of selected.slice(0,7)){
+  try{loaded.push("### Skill: "+id+"\n"+(await readSkill(id)).slice(0,10000))}
   catch(error){loaded.push("### Skill unavailable: "+id+"\n"+error.message)}
  }
  return loaded.join("\n\n");
@@ -456,10 +461,12 @@ async function connectRemoteMcp(){
 }
 async function callRemoteMcpTool(functionName,args){
  const tool=remoteMcpToolMap[functionName];if(!tool)throw new Error("Remote MCP tool is unavailable. Reconnect the server.");
- if(tool.annotations?.readOnlyHint!==true){
-  if(remoteMcpConfig.readOnly)throw new Error("Remote MCP is read-only. Enable writes in Agent tools and reconnect.");
-  if(!confirm("The agent wants to run a remote MCP action that may change external data.\n\nServer: "+remoteMcpConfig.name+"\nTool: "+tool.name+"\n\nAllow this action?"))return "User declined this remote MCP write action.";
- }
+ const readOnlyHint=tool.annotations?.readOnlyHint===true;
+ if(remoteMcpConfig.readOnly&&!readOnlyHint)throw new Error("Remote MCP is read-only. Unclassified and write-capable tools are blocked.");
+ const warning=readOnlyHint
+  ?"The remote server labels this tool read-only, but MCP annotations are advisory and cannot guarantee that it will not change data.\n\nServer: "+remoteMcpConfig.name+"\nTool: "+tool.name+"\n\nApprove this specific remote call?"
+  :"The agent wants to run a remote MCP action that may change external data.\n\nServer: "+remoteMcpConfig.name+"\nTool: "+tool.name+"\n\nApprove this specific action?";
+ if(!confirm(warning))return "User declined this remote MCP action.";
  const data=await remoteMcpRequest({jsonrpc:"2.0",id:Math.floor(Date.now()%1000000000)+20,method:"tools/call",params:{name:tool.name,arguments:args||{}}});
  if(data.response?.error)throw new Error(data.response.error.message||"Remote MCP tool failed.");
  const result=data.response?.result||{};
@@ -625,7 +632,7 @@ async function runTool(name,a){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
   const data=await workspaceRequest({action:"stop_project",project});
   if(project===activeProject)await refreshWorkspacePanel();
-  return data.stopped?"Stopped project server (PID "+data.pid+").":"No running project server was registered.";
+  return data.stopped||data.preview_stopped?"Stopped project runtime or preview.":"No running project server or preview was registered.";
  }
  if(name==="workspace_project_status"){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
@@ -1011,7 +1018,16 @@ async function continueAgentRun(){
  catch(error){spinner.remove();saveAgentResume(state);addMessage("assistant",error.name==="AbortError"?"**Task paused.** Completed changes are saved. Use Resume saved task when ready.":"**Continuation failed**"+(error.code?" ["+error.code+"]":"")+"\n\n"+error.message,{model:state.model,canContinue:!!pendingAgentRun})}
  finally{busy=false;controller=null;$("#sendBtn").disabled=false;$("#messageInput").disabled=false;$("#messageInput").focus()}
 }
-function retry(index){const c=current();if(!c||busy)return;const u=c.messages.slice(0,index).reverse().find(m=>m.role==="user");if(!u)return;c.messages=c.messages.slice(0,index);if(c.messages.at(-1)?.role==="user")c.messages.pop();saveChats();renderChat();send(u.content)}
+function retry(index){
+ const c=current();if(!c||busy)return;
+ const userMessage=c.messages.slice(0,index).reverse().find(m=>m.role==="user");
+ if(!userMessage)return;
+ const content=String(userMessage.content||"");
+ const attachments=Array.isArray(userMessage.attachments)?userMessage.attachments:[];
+ c.messages=c.messages.slice(0,index);
+ if(c.messages.at(-1)?.role==="user")c.messages.pop();
+ saveChats();renderChat();send(content,attachments);
+}
 document.addEventListener("click",e=>{
   const button=e.target.closest("button");
   if(!button||button.disabled)return;
@@ -1033,7 +1049,7 @@ if(b.id==="testProvider"){testProvider();return}
 if(b.id==="createProjectBtn"){(async()=>{const input=$("#projectNameInput"),name=input.value.trim();if(!name){toast("Enter a project name first.");return}try{const data=await workspaceRequest({action:"create_project",name});setActiveProject(data.project);input.value="";await refreshWorkspacePanel();toast("Project created: "+data.project)}catch(error){toast(error.message)}})();return}
 if(b.id==="refreshWorkspaceBtn"){refreshWorkspacePanel();return}
 if(b.id==="startProjectBtn"){(async()=>{if(!activeProject){toast("Select a project first.");return}if(!confirm("Start the development server for '"+activeProject+"'? This runs its project code on your computer."))return;try{const data=await workspaceRequest({action:"start_project",project:activeProject});toast("Project server started: "+data.url);await refreshWorkspacePanel()}catch(error){toast("Could not start project: "+error.message);await refreshWorkspacePanel()}})();return}
-if(b.id==="stopProjectBtn"){(async()=>{if(!activeProject){toast("Select a project first.");return}try{const data=await workspaceRequest({action:"stop_project",project:activeProject});toast(data.stopped?"Project server stopped.":"No project server was running.");await refreshWorkspacePanel()}catch(error){toast("Could not stop project: "+error.message)}})();return}
+if(b.id==="stopProjectBtn"){(async()=>{if(!activeProject){toast("Select a project first.");return}try{const data=await workspaceRequest({action:"stop_project",project:activeProject});toast(data.stopped||data.preview_stopped?"Project runtime or preview stopped.":"No project process or preview was running.");await refreshWorkspacePanel()}catch(error){toast("Could not stop project: "+error.message)}})();return}
 if(b.id==="connectGithubMcp"){connectGitHubMcp();return}
 if(b.dataset.addNvidiaModel){chooseNvidiaModel(b.dataset.addNvidiaModel);return}
 if(b.id==="saveRemoteMcpSettings"){saveRemoteMcpSettings();return}

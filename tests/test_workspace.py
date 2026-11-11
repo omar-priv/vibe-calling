@@ -2,7 +2,10 @@ import base64
 import io
 import re
 import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 from unittest.mock import patch
 import zipfile
 from pathlib import Path
@@ -283,6 +286,70 @@ class ResearchParsingTests(unittest.TestCase):
         self.assertEqual(server.normalize_research_result_url("http://example.com/article"), "")
 
 
+
+class PreviewIsolationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.old_root = server.WORKSPACE_ROOT
+        server.WORKSPACE_ROOT = Path(self.temp.name)
+        server.WORKSPACE_ROOT.mkdir(exist_ok=True)
+        self.project = server.WORKSPACE_ROOT / "demo"
+        self.project.mkdir()
+        (self.project / "index.html").write_text("<h1>Isolated</h1>", encoding="utf-8")
+
+    def tearDown(self):
+        server.stop_project_preview("demo")
+        server.WORKSPACE_ROOT = self.old_root
+        self.temp.cleanup()
+
+    def test_preview_rejects_traversal_and_private_files(self):
+        self.assertEqual(server.safe_preview_file(self.project, "/").name, "index.html")
+        with self.assertRaises(ValueError):
+            server.safe_preview_file(self.project, "/../outside.txt")
+        with self.assertRaises(ValueError):
+            server.safe_preview_file(self.project, "/%2e%2e/outside.txt")
+        with self.assertRaises(ValueError):
+            server.safe_preview_file(self.project, "/.env")
+
+    def test_preview_server_uses_a_separate_origin_and_serves_project(self):
+        preview = server.start_project_preview("demo")
+        self.assertNotEqual(preview["port"], server.PORT)
+        with urllib.request.urlopen(preview["url"], timeout=3) as response:
+            self.assertIn(b"Isolated", response.read())
+            self.assertEqual(response.headers.get("X-Content-Type-Options"), "nosniff")
+
+    def test_preview_server_does_not_serve_secret_files(self):
+        (self.project / ".env").write_text("DO_NOT_SERVE=secret", encoding="utf-8")
+        preview = server.start_project_preview("demo")
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            urllib.request.urlopen(preview["url"] + ".env", timeout=3)
+        self.assertEqual(error.exception.code, 404)
+
+    def test_main_app_origin_never_serves_project_html(self):
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            url = f"http://127.0.0.1:{httpd.server_address[1]}/projects/demo/index.html"
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(url, timeout=3)
+            self.assertEqual(error.exception.code, 404)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=2)
+
+
+class LocalOriginValidationTests(unittest.TestCase):
+    def test_only_exact_http_app_origins_are_accepted(self):
+        self.assertTrue(server.is_allowed_app_origin(f"http://127.0.0.1:{server.PORT}"))
+        self.assertTrue(server.is_allowed_app_origin(f"http://localhost:{server.PORT}"))
+        self.assertFalse(server.is_allowed_app_origin(f"https://127.0.0.1:{server.PORT}"))
+        self.assertFalse(server.is_allowed_app_origin(f"https://localhost:{server.PORT}"))
+        self.assertFalse(server.is_allowed_app_origin(f"http://127.0.0.1:{server.PORT}.evil.test"))
+        self.assertFalse(server.is_allowed_app_origin(f"http://127.0.0.1:{server.PORT}/unexpected"))
+
+
 class RemoteMCPValidationTests(unittest.TestCase):
     def valid_message(self):
         return {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
@@ -337,6 +404,7 @@ class AgentSkillTests(unittest.TestCase):
             "performance-engineering", "api-integration", "mcp-server-integration",
             "browser-visual-testing", "release-engineering", "web-research", "deep-research",
         }
+        expected.update({"coding-mentor", "independent-code-review", "code-review-agent"})
         self.assertTrue(expected.issubset(skill_ids))
 
     def test_upload_and_read_custom_markdown_skill(self):
@@ -350,7 +418,7 @@ class AgentSkillTests(unittest.TestCase):
         self.assertIn("primary sources", server.read_available_skill("custom:research-helper"))
 
     def test_all_builtin_skills_are_counted(self):
-        self.assertEqual(len(server.list_available_skills()), 20)
+        self.assertEqual(len(server.list_available_skills()), 23)
 
     def test_zip_skill_rejects_parent_traversal(self):
         buffer = io.BytesIO()

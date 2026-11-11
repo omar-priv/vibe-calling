@@ -19,7 +19,7 @@ No Node.js, npm, Docker, frontend build, or database is required to run the appl
 - Multi-conversation chat history with individual conversation deletion.
 - Quick Web Research and Deep Research modes in the chat composer. Both use the selected model; search runs through the local DuckDuckGo HTML connector and cite opened HTTPS sources.
 - Agent mode with long-running, resumable tasks with automatic checkpoints every 500 model turns / 2,000 tool calls, project creation, file read/write, static preview, and a limited, confirmation-gated command allowlist.
-- Twenty built-in Agent Skills covering planning, visual-reference research, UX, frontend/backend development, accessibility, API/MCP integration, browser testing, debugging, performance, security, code review, web research, and release management.
+- Twenty-three built-in Agent Skills covering planning, coding mentorship, independent/adversarial review, visual-reference research, UX, frontend/backend development, accessibility, API/MCP integration, browser testing, debugging, performance, security, code review, web research, and release management.
 - Import your own skills as a `.md` file or a `.zip` package containing one `SKILL.md`.
 - Attach up to three files to a chat message (2 MB each; 4 MB total). Supported formats include common text/code files and PNG/JPG/WEBP/GIF images.
 - Agent-generated project files can be returned as direct download links in chat.
@@ -49,7 +49,7 @@ Gemini 3.7 Flash is not listed separately because Google documents it as depreca
 
 ## Skills
 
-The 20 built-in skills are stored in `skills/<skill-name>/SKILL.md` and are available immediately. Open **Agent tools → Agent skills → Upload skill** to add a personal skill. Custom uploads are stored under `user_skills/`, which is ignored by Git so private skills are not accidentally committed.
+The 23 built-in skills are stored in `skills/<skill-name>/SKILL.md` and are available immediately. Open **Agent tools → Agent skills → Upload skill** to add a personal skill. Custom uploads are stored under `user_skills/`, which is ignored by Git so private skills are not accidentally committed.
 
 A skill is reusable instructions, not model fine-tuning. Agent mode loads relevant skill instructions during a task. Deep Research loads the dedicated multi-source research workflow.
 
@@ -78,9 +78,9 @@ See [docs/agent-tools-and-mcp.md](docs/agent-tools-and-mcp.md) for the setup and
 - The Python server binds to `127.0.0.1`; do not expose it to the public internet.
 - Provider API keys, the GitHub PAT, and remote MCP bearer tokens are stored in browser local storage. They persist after reloads but are not encrypted by this app. Avoid shared browser profiles.
 - The local proxy never saves or logs provider request bodies or credentials. It restricts outbound provider URLs to HTTPS and blocks private-network targets.
-- Project tools operate only inside `projects/<project-id>/` and reject traversal, symbolic links, and secret/private-key files.
+- Project tools operate only inside `projects/<project-id>/` and reject traversal, symbolic links, and secret/private-key files. Static project previews run on a separate ephemeral localhost port (a separate browser origin), so project JavaScript cannot read Vibe Calling's localStorage. Preview still executes the project's own code; preview only projects you trust.
 - Approved project commands execute on the user's computer. The allowlist and confirmation dialog are safeguards, not an OS-level sandbox.
-- GitHub and remote MCP write actions are off by default. Only grant narrow permissions and approve actions you understand.
+- GitHub and remote MCP write actions are off by default. Remote MCP tool calls require per-call confirmation even when the remote server labels a tool read-only, because that annotation is advisory. Only grant narrow permissions and approve actions you understand.
 - The generic remote MCP connector supports HTTPS Streamable HTTP with optional Bearer authentication; OAuth and local stdio processes are not supported.
 - Uploaded files are stored locally and are not executed by the upload feature.
 

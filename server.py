@@ -20,6 +20,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import uuid
 import urllib.error
@@ -28,6 +29,7 @@ import zipfile
 from urllib.parse import unquote, quote, urlencode, urljoin, parse_qs
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from functools import wraps
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
@@ -49,6 +51,10 @@ BLOCKED_WORKSPACE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__"
 MAX_WORKSPACE_FILE_BYTES = 2 * 1024 * 1024
 MAX_PROJECT_MEMORY_BYTES = 256 * 1024
 RUNNING_PROJECTS = {}
+PROJECT_RUNTIME_LOCKS = {}
+PROJECT_RUNTIME_LOCKS_GUARD = threading.Lock()
+PREVIEW_SERVERS = {}
+PREVIEW_SERVERS_LOCK = threading.RLock()
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_SKILL_ARCHIVE_BYTES = 3 * 1024 * 1024
 SKILLS_ROOT = ROOT / "skills"
@@ -503,6 +509,96 @@ def safe_workspace_path(project_id, relative_path):
     return base, target
 
 
+def safe_preview_file(project_root, request_target):
+    """Resolve one preview asset without traversal, symlinks, or private files."""
+    raw_path = urlsplit(str(request_target or "/")).path
+    decoded = unquote(raw_path)
+    if "\x00" in decoded or "\\" in decoded:
+        raise ValueError("Invalid preview path.")
+    if decoded.startswith("/"):
+        decoded = decoded[1:]
+    if decoded.endswith("/"):
+        decoded = decoded[:-1]
+    parts = decoded.split("/") if decoded else ["index.html"]
+    if any(part in {"", ".", ".."} for part in parts):
+        raise ValueError("Invalid preview path.")
+    if any(blocked_workspace_name(part) for part in parts):
+        raise ValueError("Private and secret files are not available in project preview.")
+    root = Path(project_root).resolve()
+    target = root
+    for part in parts:
+        target = target / part
+        if target.is_symlink():
+            raise ValueError("Symbolic links are not available in project preview.")
+    if target.is_dir():
+        target = target / "index.html"
+        if target.is_symlink():
+            raise ValueError("Symbolic links are not available in project preview.")
+    resolved = target.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("Preview path is outside the selected project.") from exc
+    if blocked_workspace_name(resolved.name) or not resolved.is_file():
+        raise ValueError("Preview file was not found.")
+    return resolved
+
+
+def start_project_preview(project_id):
+    """Serve static project previews from a separate ephemeral localhost origin."""
+    base = project_dir(project_id)
+    safe_preview_file(base, "/")
+    with PREVIEW_SERVERS_LOCK:
+        current = PREVIEW_SERVERS.get(project_id)
+        if current and current["thread"].is_alive():
+            return {"running": True, "url": current["url"], "port": current["port"]}
+        preview_server = ThreadingHTTPServer(
+            (HOST, 0), functools.partial(ProjectPreviewHandler, directory=str(base))
+        )
+        preview_server.daemon_threads = True
+        port = preview_server.server_address[1]
+        url = f"http://{HOST}:{port}/"
+        thread = threading.Thread(
+            target=preview_server.serve_forever,
+            name=f"vibe-preview-{project_id}",
+            daemon=True,
+        )
+        PREVIEW_SERVERS[project_id] = {
+            "server": preview_server, "thread": thread, "url": url, "port": port
+        }
+        thread.start()
+        return {"running": True, "url": url, "port": port}
+
+
+def stop_project_preview(project_id):
+    with PREVIEW_SERVERS_LOCK:
+        current = PREVIEW_SERVERS.pop(project_id, None)
+    if not current:
+        return {"running": False, "stopped": False}
+    preview_server = current["server"]
+    preview_server.shutdown()
+    preview_server.server_close()
+    current["thread"].join(timeout=2)
+    return {"running": False, "stopped": True}
+
+
+def is_allowed_app_origin(origin):
+    """Accept only the actual local app origin; host equality alone is insufficient."""
+    try:
+        parts = urlsplit(origin)
+        return (
+            parts.scheme.lower() == "http"
+            and parts.netloc.lower() in {f"{HOST}:{PORT}", f"localhost:{PORT}"}
+            and parts.path in {"", "/"}
+            and not parts.query
+            and not parts.fragment
+            and not parts.username
+            and not parts.password
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def list_project_files(project_id):
     base = project_dir(project_id)
     items = []
@@ -603,6 +699,18 @@ def _free_local_port():
         return sock.getsockname()[1]
 
 
+def serialize_project_runtime(function):
+    """Serialize start/status/stop operations for each project independently."""
+    @wraps(function)
+    def wrapped(project_id, *args, **kwargs):
+        with PROJECT_RUNTIME_LOCKS_GUARD:
+            lock = PROJECT_RUNTIME_LOCKS.setdefault(project_id, threading.RLock())
+        with lock:
+            return function(project_id, *args, **kwargs)
+    return wrapped
+
+
+@serialize_project_runtime
 def project_server_status(project_id):
     process_info = RUNNING_PROJECTS.get(project_id)
     if not process_info:
@@ -618,6 +726,7 @@ def project_server_status(project_id):
     return {"running": True, "url": process_info["url"], "pid": process.pid, "exit_code": None, "runtime": process_info["runtime"]}
 
 
+@serialize_project_runtime
 def start_project_server(project_id):
     base = project_dir(project_id)
     current = project_server_status(project_id)
@@ -730,6 +839,7 @@ def start_project_server(project_id):
         raise
 
 
+@serialize_project_runtime
 def stop_project_server(project_id):
     info = RUNNING_PROJECTS.get(project_id)
     if not info:
@@ -768,6 +878,13 @@ def cleanup_project_servers():
     for project_id in list(RUNNING_PROJECTS):
         try:
             stop_project_server(project_id)
+        except Exception:
+            pass
+    with PREVIEW_SERVERS_LOCK:
+        preview_ids = list(PREVIEW_SERVERS)
+    for project_id in preview_ids:
+        try:
+            stop_project_preview(project_id)
         except Exception:
             pass
 
@@ -849,6 +966,53 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 OPENER = urllib.request.build_opener(NoRedirect, urllib.request.HTTPSHandler(context=ssl.create_default_context()))
 
 
+class ProjectPreviewHandler(SimpleHTTPRequestHandler):
+    """Serve a project's public preview files from a distinct browser origin."""
+
+    def __init__(self, *args, directory=None, **kwargs):
+        self.preview_root = Path(directory).resolve()
+        super().__init__(*args, directory=str(self.preview_root), **kwargs)
+
+    def log_message(self, fmt, *args):
+        return
+
+    def _serve_preview_file(self, include_body):
+        try:
+            target = safe_preview_file(self.preview_root, self.path)
+            with target.open("rb") as source:
+                stat = os.fstat(source.fileno())
+                suffix = target.suffix.lower()
+                mime = {
+                    ".js": "application/javascript; charset=utf-8",
+                    ".css": "text/css; charset=utf-8",
+                    ".html": "text/html; charset=utf-8",
+                }.get(suffix, mimetypes.guess_type(target.name)[0] or "application/octet-stream")
+                self.send_response(200)
+                self.send_header("Content-Type", mime)
+                self.send_header("Content-Length", str(stat.st_size))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.end_headers()
+                if include_body:
+                    while True:
+                        chunk = source.read(64 * 1024)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+        except (OSError, ValueError):
+            try:
+                self.send_error(404, "Preview file not found")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    def do_GET(self):
+        self._serve_preview_file(True)
+
+    def do_HEAD(self):
+        self._serve_preview_file(False)
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -909,6 +1073,12 @@ class Handler(SimpleHTTPRequestHandler):
                 files[name] = {"exists": target.is_file(), "bytes": target.stat().st_size if target.is_file() else 0}
             self.send_json(200, {"status": "ok", "root": ROOT.name, "files": files, "bundle": "inline"})
             return
+        if request_path == "/projects" or request_path.startswith("/projects/"):
+            self.send_json(404, {"error": "Project files are served only from their isolated preview origin."})
+            return
+        if request_path not in {"", "/", "/index.html", "/styles.css", "/app.js"}:
+            self.send_json(404, {"error": "File not found."})
+            return
         super().do_GET()
 
     def do_POST(self):
@@ -921,11 +1091,13 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(403, {"error": "Unexpected Host header."})
             return
         origin = self.headers.get("Origin")
-        if origin:
-            origin_host = urlsplit(origin).netloc.lower()
-            if origin_host not in {f"{HOST}:{PORT}", f"localhost:{PORT}"}:
-                self.send_json(403, {"error": "Cross-origin requests are not allowed."})
-                return
+        if origin and not is_allowed_app_origin(origin):
+            self.send_json(403, {"error": "Cross-origin requests are not allowed."})
+            return
+        content_type = (self.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            self.send_json(415, {"error": "Content-Type must be application/json."})
+            return
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -1266,7 +1438,9 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(200, {"ok": True, **start_project_server(project)})
             return
         if action == "stop_project":
-            self.send_json(200, {"ok": True, **stop_project_server(project)})
+            runtime = stop_project_server(project)
+            preview = stop_project_preview(project)
+            self.send_json(200, {"ok": True, **runtime, "preview_stopped": preview["stopped"]})
             return
         if action == "project_status":
             self.send_json(200, {"ok": True, **project_server_status(project)})
@@ -1351,10 +1525,8 @@ class Handler(SimpleHTTPRequestHandler):
             if status["running"]:
                 self.send_json(200, {"ok": True, **status, "kind": "development-server"})
                 return
-            relative = f"/projects/{project}/index.html"
-            if not (WORKSPACE_ROOT / project / "index.html").is_file():
-                raise ValueError("This project has no index.html. Start its package.json dev script or add index.html for static preview.")
-            self.send_json(200, {"ok": True, "kind": "static", "path": relative, "url": f"http://{HOST}:{PORT}{relative}"})
+            preview = start_project_preview(project)
+            self.send_json(200, {"ok": True, "kind": "static", "path": "index.html", **preview})
             return
         raise ValueError("Unknown workspace action.")
 

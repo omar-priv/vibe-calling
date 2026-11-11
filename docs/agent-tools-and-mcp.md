@@ -41,7 +41,7 @@ description: Research a topic using primary sources and verify claims.
 3. State uncertainty and cite evidence.
 ```
 
-The complete built-in catalog also includes visual-reference-research, UX-review, accessibility-review, performance-engineering, API integration, MCP server integration, browser visual testing, release engineering, web-research, and deep-research. See docs/skills.md for the 20-skill list and docs/skills-reviewed.md for the public references inspected when strengthening the local debugging, review, and design guidance.
+The complete built-in catalog also includes visual-reference-research, UX-review, accessibility-review, performance-engineering, API integration, MCP server integration, browser visual testing, release engineering, web-research, and deep-research. See docs/skills.md for the 23-skill list and docs/skills-reviewed.md for the public references inspected when strengthening the local debugging, review, and design guidance.
 
 ## Chat attachments and generated files
 
@@ -55,7 +55,7 @@ Agent mode can:
 
 - Create and list projects.
 - List, read, and write UTF-8 project files.
-- Preview a static `index.html`.
+- Preview a static `index.html` from a separate ephemeral localhost origin.
 - Delete an individual file only after a confirmation dialog.
 - Run a small command allowlist only after user approval.
 
@@ -144,7 +144,7 @@ The **Connect another MCP server** panel supports remote MCP servers using **Str
 
 The remote URL is validated for HTTPS and public network addressing. Localhost and private-network destinations are blocked. The server receives requests and the bearer token, so connect only servers you trust. The token is stored in this browser's local storage without encryption. Do not use a shared browser profile.
 
-Read-only mode allows only tools explicitly marked `readOnlyHint: true`. Other tools are blocked until read-only mode is turned off; each write-capable or unclassified tool call then needs a separate confirmation. A remote server may not enforce the Vibe Calling UI's policy itself, so keep server permissions and token scopes narrow.
+Read-only mode blocks tools not explicitly marked `readOnlyHint: true`. Because MCP annotations are advisory and supplied by the remote server, every remote `tools/call` still requires a per-call confirmation, even when a tool is labeled read-only. When write mode is enabled, every call also requires confirmation. A remote server may not enforce Vibe Calling's UI policy itself, so keep server permissions and token scopes narrow.
 
 This connector targets **remote Streamable HTTP**. A local MCP server that requires `stdio` must be launched and supervised by a local process manager; entering its command into this URL field will not work. Remote Browser / Computer Use remains a separate planned Beta feature.
 

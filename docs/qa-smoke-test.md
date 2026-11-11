@@ -99,3 +99,15 @@ Automated Python/Node checks and browser interactions must be reported from the 
 8. Confirm that closing the browser pauses execution; Vibe Calling is not a background worker and does not execute while the browser is closed.
 
 Automated CI validates syntax and static safety checks. Live provider behavior, browser reload behavior, and the long-run smoke test above still require manual validation with a configured provider.
+
+
+## 2026-11-11 — Preview isolation and review pipeline
+
+- Static project previews now use a separate ephemeral localhost port, separating their browser origin from the app origin and its localStorage.
+- The main app server no longer exposes the `/projects/` tree; project previews reject traversal, symbolic links, and secret/private paths.
+- POST APIs now require JSON and validate the exact HTTP localhost Origin when an Origin header is present.
+- Remote MCP tool calls require per-call approval, including tools described as read-only by the remote server.
+- Regenerating a message preserves its original attachment references.
+- Added coding-mentor, independent-code-review, and adversarial second-pass review skills; Agent routing now loads them for matching requests.
+- Added regression tests for preview isolation, blocked secret paths, origin validation, skill catalog, and attachment/review routing.
+- CI checks Python compilation, JavaScript syntax, and the Python unittest suite. No real browser, Windows machine, or live provider/MCP session is implied by those automated checks.
