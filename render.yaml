@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: vibe-calling-free
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-hosted.txt && python -m py_compile server.py hosted_server.py hosted_persistence.py && python -m unittest discover -s tests -v
+    startCommand: python hosted_server.py
+    healthCheckPath: /__health
+    envVars:
+      - key: VIBE_ACCESS_PASSWORD
+        sync: false
+      - key: VIBE_SESSION_SECRET
+        generateValue: true
+      - key: NEON_DATABASE_URL
+        sync: false
+      - key: VIBE_DATA_DIR
+        value: /tmp/vibe-calling-data

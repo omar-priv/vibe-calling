@@ -1,0 +1,50 @@
+name: Free Hosted Edition validation
+
+on:
+  push:
+    branches: [hosting/free-render-neon-edition]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  hosted-edition:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install hosted database driver
+        run: pip install -r requirements-hosted.txt
+      - name: Compile local and hosted code
+        run: python -m py_compile server.py hosted_server.py hosted_persistence.py
+      - name: Run all unit and security regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate free deployment configuration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          config = Path("render.yaml").read_text(encoding="utf-8")
+          required = [
+              "plan: free",
+              "startCommand: python hosted_server.py",
+              "healthCheckPath: /__health",
+              "NEON_DATABASE_URL",
+              "VIBE_ACCESS_PASSWORD",
+              "VIBE_SESSION_SECRET",
+              "/tmp/vibe-calling-data",
+          ]
+          missing = [item for item in required if item not in config]
+          if missing:
+              raise SystemExit("Missing free-host configuration: " + ", ".join(missing))
+          if "disk:" in config or "0.5c-512mb" in config or "starter" in config:
+              raise SystemExit("Paid Render resources must not be configured.")
+          source = Path("hosted_server.py").read_text(encoding="utf-8")
+          for guard in ("HOSTED_RUNTIME_DISABLED", "HOSTED_COMMANDS_DISABLED", "PERSISTENCE_FAILED"):
+              if guard not in source:
+                  raise SystemExit("Missing hosted safety guard: " + guard)
+          print("Free Render and Neon configuration checks passed.")
+          PY

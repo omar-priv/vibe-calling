@@ -95,6 +95,14 @@ See [docs/agent-tools-and-mcp.md](docs/agent-tools-and-mcp.md) for the setup and
 - Free-model discovery is conservative. Providers that do not disclose free pricing may return an empty model list rather than showing unverified paid models.
 - API provider feature support varies by model and account quota.
 
+## Deployment editions
+
+### Local Windows edition
+The default edition remains local-first. On Windows, extract the repository and run start.bat. It uses Python 3 and does not require Node.js, npm, or Docker. The local server binds only to 127.0.0.1 and keeps local project preview/runtime behavior.
+
+### Free Hosted edition
+A separate private hosted launcher is provided in hosted_server.py. It is designed for Render Free plus Neon Free Postgres, with project files and imported skills persisted in the database. It does not replace or modify server.py or start.bat. Because free hosts sleep and have quota limits, the service is not always-on. Hosted project execution and preview are disabled until a properly isolated runtime is available. See HOSTING.md for free setup, quotas, limits, and security boundaries.
+
 ## Project files
 
 - `index.html` — interface and embedded application script.
