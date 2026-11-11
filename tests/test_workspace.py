@@ -361,14 +361,6 @@ class PinnedHTTPSValidationTests(unittest.TestCase):
         self.assertEqual(context.server_hostname, "example.com")
 
 
-    def test_skills_document_has_valid_table_rows(self):
-        document = (Path(server.ROOT) / "docs" / "skills.md").read_text(encoding="utf-8")
-        self.assertNotIn("\\n|", document)
-        self.assertIn("| `coding-mentor` |", document)
-        self.assertIn("| `independent-code-review` |", document)
-        self.assertIn("| `code-review-agent` |", document)
-
-
 class PreviewIsolationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -467,6 +459,13 @@ class RemoteMCPValidationTests(unittest.TestCase):
 
 
 class AgentSkillTests(unittest.TestCase):
+
+    def test_skills_document_has_valid_table_rows(self):
+        document = (Path(server.ROOT) / "docs" / "skills.md").read_text(encoding="utf-8")
+        self.assertNotIn("\\n|", document)
+        self.assertIn("| `coding-mentor` |", document)
+        self.assertIn("| `independent-code-review` |", document)
+        self.assertIn("| `code-review-agent` |", document)
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.old_user_skills = server.USER_SKILLS_ROOT
