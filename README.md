@@ -103,6 +103,7 @@ The default edition remains local-first. On Windows, extract the repository and 
 ### Free Hosted edition
 A separate private hosted launcher is provided in hosted_server.py. It is designed for Render Free plus Neon Free Postgres, with project files and imported skills persisted in the database. It does not replace or modify server.py or start.bat. Because free hosts sleep and have quota limits, the service is not always-on. Hosted project execution and preview are disabled until a properly isolated runtime is available. See HOSTING.md for free setup, quotas, limits, and security boundaries.
 
+## Project files
 
 - `index.html` — interface and embedded application script.
 - `app.js` — editable source of the embedded application script; keep both copies synchronized.
