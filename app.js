@@ -1028,6 +1028,14 @@ function retry(index){
  if(c.messages.at(-1)?.role==="user")c.messages.pop();
  saveChats();renderChat();send(content,attachments);
 }
+document.addEventListener("keydown",e=>{
+ if(e.defaultPrevented||e.repeat||(!e.ctrlKey&&!e.metaKey)||e.altKey||e.shiftKey||String(e.key).toLowerCase()!=="k")return;
+ const target=e.target,tag=target?.tagName;
+ if(target?.isContentEditable||["INPUT","TEXTAREA","SELECT"].includes(tag)||document.querySelector("dialog[open]"))return;
+ e.preventDefault();
+ if(busy){toast("Wait for the current response to finish before starting a new chat.");return}
+ newChat();
+});
 document.addEventListener("click",e=>{
   const button=e.target.closest("button");
   if(!button||button.disabled)return;
@@ -1063,7 +1071,6 @@ if(b.dataset.deleteChat){deleteChat(b.dataset.deleteChat);return}
 if(b.id==="clearHistory"){if(busy){toast("Wait for the active response to finish or stop it before clearing chat history.");return}if(confirm("Clear all conversations?")){clearAgentResume();chats=[];chatId=null;saveChats();renderChat()}return}
 if(b.id==="clearAll"){$("#confirmDialog").showModal();return}
 if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));try{sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}clearAgentResume();providers=[];chats=[];notes=[];chatId=null;remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};remoteMcpTools=[];remoteMcpToolMap={};$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
-if(b.id==="chatOptions"){toast("More options coming soon.");return}
 if(b.dataset.view){setView(b.dataset.view);return}
 if(b.dataset.close){$("#"+b.dataset.close)?.close();return}
 if(b.dataset.chat){if(busy){toast("Wait for the current response to finish before switching chats.");return}chatId=b.dataset.chat;renderChat();renderHistory();setView("chat");return}

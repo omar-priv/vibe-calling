@@ -148,6 +148,15 @@ Read-only mode blocks tools not explicitly marked `readOnlyHint: true`. Because 
 
 This connector targets **remote Streamable HTTP**. A local MCP server that requires `stdio` must be launched and supervised by a local process manager; entering its command into this URL field will not work. Remote Browser / Computer Use remains a separate planned Beta feature.
 
+### Protocol revision compatibility
+
+The current in-app GitHub and remote MCP clients initialize with protocol version `2025-03-26` and preserve an optional `Mcp-Session-Id` returned by the server. This is the earlier Streamable HTTP revision.
+
+The official MCP specification revision `2026-07-28` changes the transport contract: it removes protocol-level sessions and requires per-request protocol metadata, including `MCP-Protocol-Version`, `Mcp-Method`, and (for applicable methods) `Mcp-Name`. It also defines schema-driven `x-mcp-header` parameters that clients must validate and forward as `Mcp-Param-*` headers. Vibe Calling has **not yet implemented or verified** that newer request profile. A server advertising “Streamable HTTP” is therefore not, by itself, proof of compatibility; use a server that accepts the `2025-03-26` revision with this build.
+
+References: [MCP Streamable HTTP specification, 2026-07-28](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/basic/transports/streamable-http.mdx) · [GitHub MCP Streamable HTTP server notes](https://github.com/github/github-mcp-server/blob/main/docs/streamable-http.md).
+
+
 
 ## Agent execution, long-running tasks, continuation, project runtime, and memory
 
