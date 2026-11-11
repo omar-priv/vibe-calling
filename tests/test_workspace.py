@@ -473,6 +473,21 @@ class RemoteMCPValidationTests(unittest.TestCase):
             })
 
 
+class MCPCompatibilityDocumentationTests(unittest.TestCase):
+    def test_mcp_protocol_revision_limit_is_explicit(self):
+        root = Path(__file__).resolve().parents[1]
+        docs = (root / "docs" / "agent-tools-and-mcp.md").read_text(encoding="utf-8")
+        skill = (root / "skills" / "mcp-server-integration" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("2025-03-26", docs)
+        self.assertIn("2026-07-28", docs)
+        self.assertIn("has **not yet implemented or verified**", docs)
+        self.assertIn("Mcp-Name", docs)
+        self.assertIn("x-mcp-header", docs)
+        self.assertIn("2025-11-25", skill)
+        self.assertIn("Mcp-Param-*", skill)
+        self.assertIn("protocol-level sessions", skill)
+
+
 class AgentSkillTests(unittest.TestCase):
 
     def test_skills_document_has_valid_table_rows(self):
