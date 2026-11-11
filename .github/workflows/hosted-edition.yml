@@ -1,0 +1,47 @@
+name: Hosted Edition validation
+
+on:
+  push:
+    branches: [release/hosted-edition-ready]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  hosted-edition:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile local and hosted servers
+        run: python -m py_compile server.py hosted_server.py
+      - name: Run all unit and security regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Validate Render deployment configuration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          config = Path("render.yaml").read_text(encoding="utf-8")
+          required = [
+              "runtime: python",
+              "plan: 0.5c-512mb",
+              "startCommand: python hosted_server.py",
+              "healthCheckPath: /__health",
+              "mountPath: /var/data",
+              "VIBE_ACCESS_PASSWORD",
+              "VIBE_SESSION_SECRET",
+              "VIBE_DATA_DIR",
+          ]
+          missing = [item for item in required if item not in config]
+          if missing:
+              raise SystemExit("Missing Render configuration: " + ", ".join(missing))
+          source = Path("hosted_server.py").read_text(encoding="utf-8")
+          for guard in ('BIND = "0.0.0.0"', 'def do_HEAD(self):', 'HOSTED_PREVIEW_DISABLED'):
+              if guard not in source:
+                  raise SystemExit("Missing hosted security guard: " + guard)
+          print("Hosted deployment configuration checks passed.")
+          PY
