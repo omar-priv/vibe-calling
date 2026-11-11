@@ -249,6 +249,9 @@ class HostedHandler(core.Handler):
         super().do_HEAD()
 
     def do_POST(self):
+        self._pending_workspace_sync = None
+        self._pending_skills_sync = False
+        self._workspace_project_hint = None
         route = urlsplit(self.path).path
         if not self._check_origin():
             self.send_json(403, {"ok": False, "error": "A valid same-origin request is required.", "code": "CSRF_REJECTED"})
@@ -306,11 +309,17 @@ class HostedHandler(core.Handler):
                 self._workspace_project_hint = payload.get("project")
                 if action in PERSISTED_WORKSPACE_ACTIONS:
                     self._pending_workspace_sync = action
-                self.handle_workspace(payload)
+                    with STORE_LOCK:
+                        self.handle_workspace(payload)
+                else:
+                    self.handle_workspace(payload)
             elif route == "/api/skills":
                 if isinstance(payload, dict) and payload.get("action") == "install":
                     self._pending_skills_sync = True
-                self.handle_skills(payload)
+                    with STORE_LOCK:
+                        self.handle_skills(payload)
+                else:
+                    self.handle_skills(payload)
             elif route == "/api/mcp/github":
                 self.handle_github_mcp(payload)
             elif route == "/api/mcp/remote":
