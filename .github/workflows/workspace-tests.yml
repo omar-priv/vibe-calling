@@ -52,13 +52,14 @@ jobs:
         shell: pwsh
         timeout-minutes: 1
         run: |
-          $log = Join-Path $env:RUNNER_TEMP "vibe-calling-windows-smoke.log"
-          $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "start.bat" -WorkingDirectory $PWD -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $log
+          $stdout = Join-Path $env:RUNNER_TEMP "vibe-calling-windows-smoke-out.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "vibe-calling-windows-smoke-err.log"
+          $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "start.bat" -WorkingDirectory $PWD -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
           try {
             $ready = $false
             for ($i = 0; $i -lt 30; $i++) {
               if ($proc.HasExited) {
-                Get-Content $log -ErrorAction SilentlyContinue
+                Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
                 throw "start.bat exited before the local server became ready."
               }
               try {
@@ -72,7 +73,7 @@ jobs:
               }
             }
             if (-not $ready) {
-              Get-Content $log -ErrorAction SilentlyContinue
+              Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
               throw "Vibe Calling did not return its UI over localhost within 30 seconds."
             }
             Write-Host "Windows launcher started Vibe Calling and localhost returned HTTP 200."
