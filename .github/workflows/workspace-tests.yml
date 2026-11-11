@@ -48,6 +48,37 @@ jobs:
           if (-not (Test-Path "start.bat")) {
             throw "start.bat is missing"
           }
+      - name: Launch the actual Windows batch file and check HTTP response
+        shell: pwsh
+        timeout-minutes: 1
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP "vibe-calling-windows-smoke.log"
+          $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "start.bat" -WorkingDirectory $PWD -PassThru -WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $log
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              if ($proc.HasExited) {
+                Get-Content $log -ErrorAction SilentlyContinue
+                throw "start.bat exited before the local server became ready."
+              }
+              try {
+                $response = Invoke-WebRequest -Uri "http://127.0.0.1:8765/" -TimeoutSec 2 -UseBasicParsing
+                if ($response.StatusCode -eq 200 -and $response.Content -match "Vibe Calling") {
+                  $ready = $true
+                  break
+                }
+              } catch {
+                Start-Sleep -Seconds 1
+              }
+            }
+            if (-not $ready) {
+              Get-Content $log -ErrorAction SilentlyContinue
+              throw "Vibe Calling did not return its UI over localhost within 30 seconds."
+            }
+            Write-Host "Windows launcher started Vibe Calling and localhost returned HTTP 200."
+          } finally {
+            & taskkill.exe /PID $proc.Id /T /F 2>$null | Out-Null
+          }
       - name: Compile server on Windows
         run: python -m py_compile server.py
       - name: Check JavaScript syntax on Windows
