@@ -95,6 +95,16 @@ See [docs/agent-tools-and-mcp.md](docs/agent-tools-and-mcp.md) for the setup and
 - Free-model discovery is conservative. Providers that do not disclose free pricing may return an empty model list rather than showing unverified paid models.
 - API provider feature support varies by model and account quota.
 
+## Deployment editions
+
+### Local Windows edition
+The default edition remains local-first. On Windows, download the repository ZIP, extract it, and run start.bat. It uses Python 3 and does not require Node.js, npm, or Docker. The local server binds only to 127.0.0.1.
+
+### Hosted edition
+A separate single-owner Hosted Edition is prepared in hosted_server.py with a Render Blueprint in render.yaml. It requires a paid Render service and persistent disk to retain projects and imported skills. It is not a multi-user service and is not a zero-cost persistent deployment. Hosted project previews are disabled until a separate preview origin is implemented; see HOSTING.md for security boundaries, cost, deployment, and rollback steps.
+
+The hosted server does not replace or change server.py or start.bat. A health-check response does not prove that live AI providers, MCP servers, or every project command work.
+
 ## Project files
 
 - `index.html` — interface and embedded application script.
