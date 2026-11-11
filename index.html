@@ -217,7 +217,7 @@
 /* Vibe Calling UI — robust event delegation edition */
 (() => {
 "use strict";
-const $=s=>document.querySelector(s), $=s=>[...document.querySelectorAll(s)];
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const KEYS={providers:"vc_providers_v1",chats:"vc_chats_v1",notes:"vc_notes_v1",mcp:"vc_github_mcp_v1",remoteMcp:"vc_remote_mcp_v1",researchMode:"vc_research_mode_v1"};
 const AGENT_RESUME_KEY="vc_agent_resume_v1";
 const AGENT_MAX_TURNS_PER_RUN=500;
@@ -250,7 +250,7 @@ window.addEventListener("error",e=>fatal(e.message||"Unknown JavaScript error"))
 window.addEventListener("unhandledrejection",e=>fatal(e.reason?.message||String(e.reason||"Unhandled promise rejection")));
 const cleanUrl=s=>String(s||"").trim().replace(/\/+$/,"").replace(/\/chat\/completions$/i,"").replace(/\/models$/i,"");
 const byId=id=>providers.find(p=>p.id===id),current=()=>chats.find(c=>c.id===chatId);
-function setView(name){$(".view").forEach(x=>x.classList.remove("active"));$("#"+name+"View")?.classList.add("active");$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.view===name));$("#crumb").textContent=({chat:"Chat",providers:"Providers",tools:"Agent tools",settings:"Settings"})[name]||name;$("#sidebar").classList.remove("open")}
+function setView(name){$$(".view").forEach(x=>x.classList.remove("active"));$("#"+name+"View")?.classList.add("active");$$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.view===name));$("#crumb").textContent=({chat:"Chat",providers:"Providers",tools:"Agent tools",settings:"Settings"})[name]||name;$("#sidebar").classList.remove("open")}
 function saveChats(){write(KEYS.chats,chats);renderHistory()}
 function saveProviders(){write(KEYS.providers,providers);renderProviders();renderModels()}
 function newChat(){const c={id:uid(),title:"New conversation",messages:[],createdAt:Date.now()};chats.unshift(c);chatId=c.id;saveChats();renderChat();setView("chat")}
