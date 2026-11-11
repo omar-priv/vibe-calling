@@ -128,6 +128,58 @@ class HostedAuthTests(unittest.TestCase):
             status, _, _ = self.request(method, "/projects/demo/index.html", headers={"Cookie": cookie})
             self.assertEqual(status, 404)
 
+    def test_workspace_write_is_confirmed_only_after_database_sync(self):
+        class FakeStore:
+            def __init__(self):
+                self.calls = []
+            def sync_project(self, project_id, root):
+                self.calls.append((project_id, root))
+            def sync_skills(self, root):
+                pass
+
+        previous = hosted_server.STORE
+        fake = FakeStore()
+        hosted_server.STORE = fake
+        try:
+            cookie, _ = self.login()
+            status, _, body = self.request(
+                "POST", "/api/workspace",
+                body=json.dumps({"action": "write_file", "project": "demo",
+                                 "path": "saved.txt", "content": "saved to Neon"}),
+                headers={"Content-Type": "application/json", "Cookie": cookie, "Origin": self.origin},
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body)["ok"], True)
+            self.assertEqual(len(fake.calls), 1)
+            self.assertEqual(fake.calls[0][0], "demo")
+            self.assertTrue((core.WORKSPACE_ROOT / "demo" / "saved.txt").is_file())
+        finally:
+            hosted_server.STORE = previous
+
+    def test_workspace_write_returns_error_when_database_sync_fails(self):
+        class FailingStore:
+            def sync_project(self, project_id, root):
+                raise RuntimeError("database is unavailable")
+            def sync_skills(self, root):
+                raise RuntimeError("database is unavailable")
+
+        previous = hosted_server.STORE
+        hosted_server.STORE = FailingStore()
+        try:
+            cookie, _ = self.login()
+            status, _, body = self.request(
+                "POST", "/api/workspace",
+                body=json.dumps({"action": "write_file", "project": "demo",
+                                 "path": "not-confirmed.txt", "content": "temporary"}),
+                headers={"Content-Type": "application/json", "Cookie": cookie, "Origin": self.origin},
+            )
+            self.assertEqual(status, 503)
+            payload = json.loads(body)
+            self.assertEqual(payload["code"], "PERSISTENCE_FAILED")
+            self.assertFalse(payload["ok"])
+        finally:
+            hosted_server.STORE = previous
+
     def test_file_download_requires_auth_and_uses_attachment_header(self):
         status, headers, _ = self.request("GET", "/api/download/demo/readme.txt")
         self.assertEqual(status, 303)
