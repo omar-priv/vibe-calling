@@ -59,7 +59,7 @@ Agent mode can:
 - Delete an individual file only after a confirmation dialog.
 - Run a small command allowlist only after user approval.
 
-Projects live under `projects/<project-id>/`. Filesystem access blocks parent traversal, absolute paths, symbolic links, secrets such as `.env`, private keys, and dependency/build folders. Individual workspace text files are limited to 2 MB.
+Projects live under `projects/<project-id>/`. Filesystem access blocks parent traversal, absolute paths, symbolic links, `.env` files, common secret directories such as `secrets/`, `.aws/`, `.ssh/`, `.kube/`, credential files (including YAML), private keys, and dependency/build folders. Individual workspace text files are limited to 2 MB.
 
 ### Execution boundary
 

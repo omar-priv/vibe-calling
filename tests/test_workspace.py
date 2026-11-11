@@ -55,6 +55,31 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         self.assertNotIn(".env", paths)
         self.assertNotIn("node_modules/hidden.js", paths)
 
+
+    def test_secret_directories_and_credential_files_are_blocked(self):
+        for relative in (
+            "secrets/config.yaml",
+            ".secrets/api.json",
+            ".aws/credentials",
+            ".ssh/id_ecdsa",
+            "credentials.yaml",
+            "credentials.yml",
+            "service-account.json",
+            "token.json",
+        ):
+            with self.subTest(path=relative):
+                with self.assertRaises(ValueError):
+                    server.safe_workspace_path("demo", relative)
+
+    def test_project_listing_skips_secret_directories(self):
+        root = server.WORKSPACE_ROOT / "demo"
+        for dirname in ("secrets", ".secrets", ".aws", ".ssh"):
+            folder = root / dirname
+            folder.mkdir(exist_ok=True)
+            (folder / "credentials").write_text("private", encoding="utf-8")
+        listed = [item["path"] for item in server.list_project_files("demo")]
+        self.assertFalse(any(path.startswith(("secrets/", ".secrets/", ".aws/", ".ssh/")) for path in listed))
+
     def test_command_runner_rejects_shell_commands(self):
         with self.assertRaises(ValueError):
             server.run_project_command("demo", "python -m pytest; whoami")

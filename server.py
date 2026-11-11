@@ -47,9 +47,9 @@ ALLOWED_PATHS = {"/models", "/chat/completions"}
 HEADER_NAME_RE = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 PROJECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,49}$")
 SAFE_COMMAND_TOKEN_RE = re.compile(r"^[A-Za-z0-9_./:@=+,-]+$")
-IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", ".vibe", "dist", "build", "coverage"}
-BLOCKED_FILES = {".env", ".env.local", ".env.production", ".env.development", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "credentials.json", "secrets.json", "id_rsa", "id_ed25519"}
-BLOCKED_WORKSPACE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".next", ".vibe", ".ssh", ".aws"}
+IGNORED_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".next", ".vibe", "dist", "build", "coverage", ".ssh", ".aws", ".azure", ".kube", ".gnupg", ".docker", ".secrets", "secrets"}
+BLOCKED_FILES = {".env", ".env.local", ".env.production", ".env.development", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "credentials", "credentials.json", "credentials.yaml", "credentials.yml", "secrets.json", "secrets.yaml", "secrets.yml", "service-account.json", "service_account.json", "token.json", "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"}
+BLOCKED_WORKSPACE_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".next", ".vibe", ".ssh", ".aws", ".azure", ".kube", ".gnupg", ".docker", ".secrets", "secrets"}
 MAX_WORKSPACE_FILE_BYTES = 2 * 1024 * 1024
 MAX_PROJECT_MEMORY_BYTES = 256 * 1024
 RUNNING_PROJECTS = {}
@@ -598,7 +598,7 @@ def list_project_files(project_id):
     base = project_dir(project_id)
     items = []
     for current, dirs, files in os.walk(base, followlinks=False):
-        dirs[:] = [d for d in dirs if d not in IGNORED_DIRS and not (Path(current) / d).is_symlink()]
+        dirs[:] = [d for d in dirs if d not in IGNORED_DIRS and not blocked_workspace_name(d) and not (Path(current) / d).is_symlink()]
         for filename in files:
             path = Path(current) / filename
             relative = path.relative_to(base).as_posix()

@@ -111,3 +111,11 @@ Automated CI validates syntax and static safety checks. Live provider behavior, 
 - Added coding-mentor, independent-code-review, and adversarial second-pass review skills; Agent routing now loads them for matching requests.
 - Added regression tests for preview isolation, blocked secret paths, origin validation, skill catalog, and attachment/review routing.
 - CI checks Python compilation, JavaScript syntax, and the Python unittest suite. No real browser, Windows machine, or live provider/MCP session is implied by those automated checks.
+
+
+## 2026-11-11 — Secret directory and credential-file boundaries
+
+- Workspace path checks now block common secret directories and credential filenames, including YAML credentials, service-account JSON, and token JSON.
+- Recursive file listings now skip directories identified as sensitive, not just build/dependency directories.
+- Regression tests cover secret-path reads and listings that previously could expose these paths.
+- Documentation now states that outbound HTTPS bypasses environment/system proxy settings as part of IP pinning; proxy-only network configurations are not supported.
