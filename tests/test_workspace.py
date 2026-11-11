@@ -260,6 +260,21 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertIn("before switching chats", app)
 
 
+
+    def test_new_chat_shortcut_is_cross_platform_and_visible_controls_are_real(self):
+        root = Path(__file__).resolve().parents[1]
+        app = (root / "app.js").read_text(encoding="utf-8")
+        html = (root / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<kbd>Ctrl / ⌘ K</kbd>', html)
+        self.assertIn('document.addEventListener("keydown"', app)
+        self.assertIn('(!e.ctrlKey&&!e.metaKey)', app)
+        self.assertIn('String(e.key).toLowerCase()!=="k"', app)
+        self.assertIn('["INPUT","TEXTAREA","SELECT"].includes(tag)', app)
+        self.assertIn('document.querySelector("dialog[open]")', app)
+        self.assertNotIn('id="chatOptions"', html)
+        self.assertNotIn('if(b.id==="chatOptions")', app)
+        self.assertIn("23 built-in skills are ready", html)
+
 class ResearchParsingTests(unittest.TestCase):
     def test_duckduckgo_parser_reads_title_and_snippet(self):
         html = (
