@@ -29,6 +29,7 @@ import zipfile
 from urllib.parse import unquote, quote, urlencode, urljoin, parse_qs
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import functools
 from functools import wraps
 from urllib.parse import urlsplit
 
