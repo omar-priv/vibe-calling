@@ -319,6 +319,8 @@ class PinnedHTTPSValidationTests(unittest.TestCase):
                 self.closed = True
 
         class FakeTLSContext:
+            verify_mode = server.ssl.CERT_REQUIRED
+            check_hostname = True
             def wrap_socket(self, connection, server_hostname):
                 self.server_hostname = server_hostname
                 return connection
@@ -339,7 +341,7 @@ class PinnedHTTPSValidationTests(unittest.TestCase):
         self.assertNotIn("\\n|", document)
         self.assertIn("| `coding-mentor` |", document)
         self.assertIn("| `independent-code-review` |", document)
-        self.assertIn("| `code-review-agent` |")
+        self.assertIn("| `code-review-agent` |", document)
 
 
 class PreviewIsolationTests(unittest.TestCase):
