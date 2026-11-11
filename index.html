@@ -19,7 +19,7 @@
         <div class="brand-mark"><span></span><span></span><span></span></div>
         <div><b>vibe<span>calling</span></b><small>YOUR AI WORKSPACE</small></div>
       </div>
-      <button class="new-chat" id="newChatBtn"><span>＋</span> New conversation <kbd>⌘ K</kbd></button>
+      <button class="new-chat" id="newChatBtn"><span>＋</span> New conversation <kbd>Ctrl / ⌘ K</kbd></button>
       <div class="side-label">WORKSPACE</div>
       <button class="nav-item active" data-view="chat"><span>◫</span> Chat <span class="nav-dot"></span></button>
       <button class="nav-item" data-view="providers"><span>⌘</span> Providers <small id="providerCount">0</small></button>
@@ -51,7 +51,7 @@
           </div>
           <div class="toolbar-right">
             <label class="agent-toggle"><input type="checkbox" id="agentToggle"><span class="toggle"></span><b>Agent mode</b><em>BETA</em></label>
-            <button type="button" class="icon-button" id="chatOptions" title="Chat options" aria-label="Chat options">···</button>
+            
           </div>
         </div>
 
@@ -114,7 +114,7 @@
         </div>
         <section class="workspace-panel skills-manager" aria-labelledby="skillsHeading">
           <div class="workspace-panel-head skills-panel-head">
-            <div><div class="eyebrow"><span></span> REUSABLE KNOW-HOW</div><h2 id="skillsHeading">Agent skills</h2><p>Twenty built-in skills are ready without installing anything. Add your own Markdown skill or ZIP package.</p></div>
+            <div><div class="eyebrow"><span></span> REUSABLE KNOW-HOW</div><h2 id="skillsHeading">Agent skills</h2><p>23 built-in skills are ready without installing anything. Add your own Markdown skill or ZIP package.</p></div>
             <div class="skills-upload-action"><input id="skillFileInput" type="file" hidden accept=".md,.zip" /><button type="button" class="primary-button" id="uploadSkillBtn">＋ Upload skill</button></div>
           </div>
           <div class="workspace-status" id="skillsStatus" role="status" aria-live="polite">Loading skills…</div>
@@ -217,7 +217,7 @@
 /* Vibe Calling UI — robust event delegation edition */
 (() => {
 "use strict";
-const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const $=s=>document.querySelector(s), $=s=>[...document.querySelectorAll(s)];
 const KEYS={providers:"vc_providers_v1",chats:"vc_chats_v1",notes:"vc_notes_v1",mcp:"vc_github_mcp_v1",remoteMcp:"vc_remote_mcp_v1",researchMode:"vc_research_mode_v1"};
 const AGENT_RESUME_KEY="vc_agent_resume_v1";
 const AGENT_MAX_TURNS_PER_RUN=500;
@@ -250,7 +250,7 @@ window.addEventListener("error",e=>fatal(e.message||"Unknown JavaScript error"))
 window.addEventListener("unhandledrejection",e=>fatal(e.reason?.message||String(e.reason||"Unhandled promise rejection")));
 const cleanUrl=s=>String(s||"").trim().replace(/\/+$/,"").replace(/\/chat\/completions$/i,"").replace(/\/models$/i,"");
 const byId=id=>providers.find(p=>p.id===id),current=()=>chats.find(c=>c.id===chatId);
-function setView(name){$$(".view").forEach(x=>x.classList.remove("active"));$("#"+name+"View")?.classList.add("active");$$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.view===name));$("#crumb").textContent=({chat:"Chat",providers:"Providers",tools:"Agent tools",settings:"Settings"})[name]||name;$("#sidebar").classList.remove("open")}
+function setView(name){$(".view").forEach(x=>x.classList.remove("active"));$("#"+name+"View")?.classList.add("active");$(".nav-item").forEach(x=>x.classList.toggle("active",x.dataset.view===name));$("#crumb").textContent=({chat:"Chat",providers:"Providers",tools:"Agent tools",settings:"Settings"})[name]||name;$("#sidebar").classList.remove("open")}
 function saveChats(){write(KEYS.chats,chats);renderHistory()}
 function saveProviders(){write(KEYS.providers,providers);renderProviders();renderModels()}
 function newChat(){const c={id:uid(),title:"New conversation",messages:[],createdAt:Date.now()};chats.unshift(c);chatId=c.id;saveChats();renderChat();setView("chat")}
@@ -1244,6 +1244,14 @@ function retry(index){
  if(c.messages.at(-1)?.role==="user")c.messages.pop();
  saveChats();renderChat();send(content,attachments);
 }
+document.addEventListener("keydown",e=>{
+ if(e.defaultPrevented||e.repeat||(!e.ctrlKey&&!e.metaKey)||e.altKey||e.shiftKey||String(e.key).toLowerCase()!=="k")return;
+ const target=e.target,tag=target?.tagName;
+ if(target?.isContentEditable||["INPUT","TEXTAREA","SELECT"].includes(tag)||document.querySelector("dialog[open]"))return;
+ e.preventDefault();
+ if(busy){toast("Wait for the current response to finish before starting a new chat.");return}
+ newChat();
+});
 document.addEventListener("click",e=>{
   const button=e.target.closest("button");
   if(!button||button.disabled)return;
@@ -1279,7 +1287,6 @@ if(b.dataset.deleteChat){deleteChat(b.dataset.deleteChat);return}
 if(b.id==="clearHistory"){if(busy){toast("Wait for the active response to finish or stop it before clearing chat history.");return}if(confirm("Clear all conversations?")){clearAgentResume();chats=[];chatId=null;saveChats();renderChat()}return}
 if(b.id==="clearAll"){$("#confirmDialog").showModal();return}
 if(b.id==="confirmClear"){Object.values(KEYS).forEach(k=>localStorage.removeItem(k));try{sessionStorage.removeItem(AGENT_RESUME_KEY)}catch{}clearAgentResume();providers=[];chats=[];notes=[];chatId=null;remoteMcpConfig={name:"",url:"",token:"",readOnly:true,sessionId:"",connected:false};remoteMcpTools=[];remoteMcpToolMap={};$("#confirmDialog").close();saveProviders();saveChats();renderChat();setView("chat");toast("Local data cleared");return}
-if(b.id==="chatOptions"){toast("More options coming soon.");return}
 if(b.dataset.view){setView(b.dataset.view);return}
 if(b.dataset.close){$("#"+b.dataset.close)?.close();return}
 if(b.dataset.chat){if(busy){toast("Wait for the current response to finish before switching chats.");return}chatId=b.dataset.chat;renderChat();renderHistory();setView("chat");return}
