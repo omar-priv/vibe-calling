@@ -119,3 +119,13 @@ Automated CI validates syntax and static safety checks. Live provider behavior, 
 - Recursive file listings now skip directories identified as sensitive, not just build/dependency directories.
 - Regression tests cover secret-path reads and listings that previously could expose these paths.
 - Documentation now states that outbound HTTPS bypasses environment/system proxy settings as part of IP pinning; proxy-only network configurations are not supported.
+
+
+## 2026-11-11 — Keyboard shortcut and truthful controls
+
+- Wired the advertised new-chat shortcut to both Ctrl+K (Windows/Linux) and Command+K (macOS).
+- The shortcut ignores editable fields and open dialogs, and gives feedback instead of switching chats during an active response.
+- Removed the inactive Chat options placeholder rather than presenting a control that only says the feature is coming soon.
+- Corrected the Agent skills panel count from 20 to the actual 23 bundled skills.
+- Added a regression test for shortcut behavior, shortcut labeling, skill count, and removal of the inert control.
+- Kept `app.js` and the embedded script in `index.html` byte-for-byte synchronized.
