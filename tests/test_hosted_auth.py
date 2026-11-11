@@ -19,6 +19,8 @@ import server as core
 class HostedAuthTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.old_workspace_root = core.WORKSPACE_ROOT
+        cls.old_user_skills_root = core.USER_SKILLS_ROOT
         cls.temp = tempfile.TemporaryDirectory()
         data = Path(cls.temp.name)
         core.WORKSPACE_ROOT = data / "projects"
@@ -39,6 +41,8 @@ class HostedAuthTests(unittest.TestCase):
         cls.httpd.shutdown()
         cls.httpd.server_close()
         cls.thread.join(timeout=2)
+        core.WORKSPACE_ROOT = cls.old_workspace_root
+        core.USER_SKILLS_ROOT = cls.old_user_skills_root
         cls.temp.cleanup()
 
     def request(self, method, path, body=None, headers=None):
