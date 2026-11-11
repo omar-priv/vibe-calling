@@ -42,9 +42,10 @@ class NeonWorkspaceStore:
             raise ValueError("Invalid persisted file path.")
         if "\\" in relative_path or "\x00" in relative_path:
             raise ValueError("Invalid persisted file path.")
+        raw_parts = relative_path.split("/")
         path = PurePosixPath(relative_path)
         parts = path.parts
-        if path.is_absolute() or not parts or any(p in {"", ".", ".."} for p in parts):
+        if path.is_absolute() or not parts or any(p in {"", ".", ".."} for p in raw_parts):
             raise ValueError("Persisted paths must remain inside one project.")
         if relative_path.startswith("/") or ":" in parts[0]:
             raise ValueError("Persisted paths must be relative.")
@@ -308,7 +309,10 @@ class NeonWorkspaceStore:
                         break
                     for (project_id,) in ids:
                         self.validate_project_id(project_id)
-                        (projects / project_id).mkdir(exist_ok=True)
+                        project_path = projects / project_id
+                        if project_path.is_symlink():
+                            raise ValueError("A restored project directory is a symbolic link.")
+                        project_path.mkdir(exist_ok=True)
                         restored_projects += 1
                         cursor_name = "vibe_restore_" + hashlib.sha1(project_id.encode()).hexdigest()[:16]
                         with conn.cursor(name=cursor_name) as file_cur:
