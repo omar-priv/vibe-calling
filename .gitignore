@@ -12,3 +12,7 @@ node_modules/
 
 # User-imported agent skills stay local unless explicitly shared.
 user_skills/
+
+# Local folder registrations contain private absolute paths.
+.workspace-roots.json
+.workspace-roots.json.tmp
