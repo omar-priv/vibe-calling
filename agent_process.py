@@ -50,7 +50,7 @@ class _WindowsJob:
         kernel = ctypes.WinDLL("Kernel32.dll", use_last_error=True)
         kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
         kernel.CreateJobObjectW.restype = wintypes.HANDLE
-        kernel.SetInformationJobObject.argtypes = [wintypes.HANDLE, wintypes.INT, ctypes.c_void_p, wintypes.DWORD]
+        kernel.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
         kernel.SetInformationJobObject.restype = wintypes.BOOL
         kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
         kernel.AssignProcessToJobObject.restype = wintypes.BOOL
@@ -83,9 +83,57 @@ class _WindowsJob:
         if os.name != "nt":
             return
         import ctypes
-        result = self.kernel.ResumeThread(int(process._thread))
-        if result == 0xFFFFFFFF:
+        from ctypes import wintypes
+
+        class THREADENTRY32(ctypes.Structure):
+            _fields_ = [
+                ("dwSize", wintypes.DWORD),
+                ("cntUsage", wintypes.DWORD),
+                ("th32ThreadID", wintypes.DWORD),
+                ("th32OwnerProcessID", wintypes.DWORD),
+                ("tpBasePri", wintypes.LONG),
+                ("tpDeltaPri", wintypes.LONG),
+                ("dwFlags", wintypes.DWORD),
+            ]
+
+        kernel = self.kernel
+        kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+        kernel.Thread32First.argtypes = [wintypes.HANDLE, ctypes.POINTER(THREADENTRY32)]
+        kernel.Thread32First.restype = wintypes.BOOL
+        kernel.Thread32Next.argtypes = [wintypes.HANDLE, ctypes.POINTER(THREADENTRY32)]
+        kernel.Thread32Next.restype = wintypes.BOOL
+        kernel.OpenThread.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel.OpenThread.restype = wintypes.HANDLE
+        kernel.ResumeThread.argtypes = [wintypes.HANDLE]
+        kernel.ResumeThread.restype = wintypes.DWORD
+
+        snapshot = kernel.CreateToolhelp32Snapshot(0x00000004, 0)
+        if not snapshot or snapshot == wintypes.HANDLE(-1).value:
             raise ctypes.WinError(ctypes.get_last_error())
+        found = False
+        try:
+            entry = THREADENTRY32()
+            entry.dwSize = ctypes.sizeof(THREADENTRY32)
+            more = kernel.Thread32First(snapshot, ctypes.byref(entry))
+            while more:
+                if entry.th32OwnerProcessID == process.pid:
+                    thread = kernel.OpenThread(0x0002, False, entry.th32ThreadID)
+                    if thread:
+                        try:
+                            previous = kernel.ResumeThread(thread)
+                            if previous == 0xFFFFFFFF:
+                                raise ctypes.WinError(ctypes.get_last_error())
+                            found = True
+                        finally:
+                            kernel.CloseHandle(thread)
+                        break
+                entry.dwSize = ctypes.sizeof(THREADENTRY32)
+                more = kernel.Thread32Next(snapshot, ctypes.byref(entry))
+        finally:
+            kernel.CloseHandle(snapshot)
+        if not found:
+            raise RuntimeError("Could not safely resume the suspended command process after Job Object assignment.")
 
     def close(self) -> None:
         if self.handle is not None:
@@ -99,7 +147,7 @@ def run(command: Sequence[str], *, cwd: str, env: dict[str, str], timeout: int,
     if not command or not all(isinstance(item, str) for item in command):
         raise ValueError("A parsed argument list is required.")
     job = _WindowsJob(memory_mb=memory_mb)
-    creationflags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | 0x00000004) if os.name == "nt" else 0
+    creationflags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | 0x00000004 | 0x08000000) if os.name == "nt" else 0
     process = None
     try:
         process = subprocess.Popen(
