@@ -1155,7 +1155,7 @@ def run_guarded_terminal(project_id, command, timeout_seconds=300):
         raise ValueError("Enter one terminal command (maximum 1,500 characters).")
     if any(char in command for char in ("\x00", "\r", "\n", ";", "&", "|", "<", ">", "\x60", "$", "%", "!", "^")):
         raise ValueError("Run one command at a time. Shell operators and environment expansion are blocked.")
-    token_pattern = re.compile(r'"([^"]*)"|\\'([^\\']*)\\'|([^\\s]+)')
+    token_pattern = re.compile(r""" "([^"]*)"|'([^']*)'|([^\s]+) """.strip())
     parts = []
     for match in token_pattern.finditer(command.strip()):
         token = next((part for part in match.groups() if part is not None), "")
