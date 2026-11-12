@@ -39,6 +39,7 @@ WORKSPACE_ROOT = ROOT / "projects"
 if WORKSPACE_ROOT.is_symlink():
     raise RuntimeError("The local projects directory cannot be a symbolic link.")
 WORKSPACE_ROOT.mkdir(exist_ok=True)
+WORKSPACE_REGISTRY_FILE = ROOT / ".workspace-roots.json"
 HOST = "127.0.0.1"
 PORT = 8765
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
@@ -57,6 +58,7 @@ PROJECT_RUNTIME_LOCKS = {}
 PROJECT_RUNTIME_LOCKS_GUARD = threading.Lock()
 PREVIEW_SERVERS = {}
 PREVIEW_SERVERS_LOCK = threading.RLock()
+WORKSPACE_ROOTS = {}
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_SKILL_ARCHIVE_BYTES = 3 * 1024 * 1024
 SKILLS_ROOT = ROOT / "skills"
@@ -456,6 +458,111 @@ def validate_remote_mcp_payload(payload):
     return parts, host, port, prefix, token.strip(), message, method
 
 
+
+def load_workspace_roots():
+    """Load user-selected local folders without exposing them to the public host."""
+    try:
+        data = json.loads(WORKSPACE_REGISTRY_FILE.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    roots = {}
+    for workspace_id, item in data.items():
+        if not isinstance(workspace_id, str) or not re.fullmatch(r"local-[a-f0-9]{10}", workspace_id):
+            continue
+        if not isinstance(item, dict) or not isinstance(item.get("path"), str):
+            continue
+        try:
+            path = Path(item["path"])
+            if path.is_symlink() or not path.is_dir():
+                continue
+            resolved = path.resolve(strict=True)
+            roots[workspace_id] = {"name": str(item.get("name") or resolved.name)[:100], "path": str(resolved)}
+        except (OSError, RuntimeError):
+            continue
+    return roots
+
+
+def save_workspace_roots():
+    """Atomically save selected folder registrations beside the local app."""
+    temporary = WORKSPACE_REGISTRY_FILE.with_suffix(".tmp")
+    encoded = json.dumps(WORKSPACE_ROOTS, ensure_ascii=False, indent=2)
+    temporary.write_text(encoded, encoding="utf-8", newline="\n")
+    os.replace(temporary, WORKSPACE_REGISTRY_FILE)
+
+
+def register_workspace_folder(selected_path):
+    """Register one user-selected folder; never accept arbitrary paths from model tools."""
+    if not isinstance(selected_path, str) or not selected_path.strip() or len(selected_path) > 2048:
+        raise ValueError("Choose a valid local folder.")
+    candidate = Path(selected_path).expanduser()
+    if candidate.is_symlink():
+        raise ValueError("Symbolic-link workspace roots are not supported.")
+    try:
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("The selected folder does not exist or cannot be opened.") from exc
+    if not resolved.is_dir():
+        raise ValueError("The selected path is not a folder.")
+    if resolved == Path(resolved.anchor) or resolved == Path.home().resolve():
+        raise ValueError("Choose a project folder, not a drive root or your entire user profile.")
+    for variable in ("WINDIR", "ProgramFiles", "ProgramFiles(x86)", "ProgramData"):
+        system_path = os.environ.get(variable)
+        if not system_path:
+            continue
+        try:
+            resolved.relative_to(Path(system_path).resolve())
+        except (ValueError, OSError):
+            continue
+        raise ValueError("Windows system and application folders cannot be added as workspaces.")
+    for workspace_id, item in WORKSPACE_ROOTS.items():
+        try:
+            if Path(item["path"]).resolve() == resolved:
+                return {"id": workspace_id, "name": item["name"], "path": str(resolved), "existing": True}
+        except (KeyError, OSError, RuntimeError):
+            continue
+    workspace_id = "local-" + uuid.uuid4().hex[:10]
+    WORKSPACE_ROOTS[workspace_id] = {"name": resolved.name[:100] or "Local folder", "path": str(resolved)}
+    try:
+        save_workspace_roots()
+    except OSError as exc:
+        WORKSPACE_ROOTS.pop(workspace_id, None)
+        raise ValueError("Could not save the selected workspace registration.") from exc
+    return {"id": workspace_id, "name": WORKSPACE_ROOTS[workspace_id]["name"], "path": str(resolved), "existing": False}
+
+
+def pick_workspace_folder():
+    """Open the native operating-system folder picker after an explicit UI click."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception as exc:
+        raise ValueError("The native folder picker is unavailable on this Python installation.") from exc
+    window = None
+    selected = ""
+    try:
+        window = tk.Tk()
+        window.withdraw()
+        try:
+            window.attributes("-topmost", True)
+        except Exception:
+            pass
+        selected = filedialog.askdirectory(parent=window, title="Choose an existing project folder", mustexist=True)
+    except Exception as exc:
+        raise ValueError("Could not open the native folder picker: " + str(exc)) from exc
+    finally:
+        if window is not None:
+            try:
+                window.destroy()
+            except Exception:
+                pass
+    return register_workspace_folder(selected) if selected else None
+
+
+WORKSPACE_ROOTS = load_workspace_roots()
+
+
 def blocked_workspace_name(name):
     lowered = name.lower()
     if lowered.startswith(".env") and lowered not in {".env.example", ".env.sample"}:
@@ -468,14 +575,26 @@ def blocked_workspace_name(name):
 def project_dir(project_id, must_exist=True):
     if not isinstance(project_id, str) or not PROJECT_ID_RE.fullmatch(project_id):
         raise ValueError("Invalid project ID.")
-    candidate = WORKSPACE_ROOT / project_id
+    registered = WORKSPACE_ROOTS.get(project_id)
+    candidate = Path(registered["path"]) if registered else WORKSPACE_ROOT / project_id
     if candidate.is_symlink():
-        raise ValueError("Project folders cannot be symbolic links.")
-    target = candidate.resolve()
+        raise ValueError("Workspace folders cannot be symbolic links.")
     try:
-        target.relative_to(WORKSPACE_ROOT.resolve())
-    except ValueError:
-        raise ValueError("Project path is outside the workspace.")
+        target = candidate.resolve(strict=must_exist)
+    except (OSError, RuntimeError) as exc:
+        raise ValueError("Workspace folder does not exist or cannot be opened.") from exc
+    if registered:
+        try:
+            expected = Path(registered["path"]).resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise ValueError("The registered workspace folder is no longer available.") from exc
+        if target != expected:
+            raise ValueError("Workspace path changed after registration.")
+    else:
+        try:
+            target.relative_to(WORKSPACE_ROOT.resolve())
+        except ValueError:
+            raise ValueError("Project path is outside the workspace.")
     if must_exist and not target.is_dir():
         raise ValueError("Project does not exist. Create it first.")
     return target
@@ -614,6 +733,51 @@ def list_project_files(project_id):
             if len(items) >= 600:
                 return sorted(items, key=lambda item: item["path"])
     return sorted(items, key=lambda item: item["path"])
+
+
+
+def find_project_files(project_id, query, limit=100):
+    if not isinstance(query, str) or not query.strip() or len(query) > 200:
+        raise ValueError("Enter a file-name search term (1–200 characters).")
+    needle = query.casefold()
+    matches = []
+    for item in list_project_files(project_id):
+        if needle in item["path"].casefold():
+            matches.append(item)
+            if len(matches) >= limit:
+                break
+    return matches
+
+
+def search_project_text(project_id, query, limit=80):
+    """Search readable source text without opening secrets, binaries, or huge files."""
+    if not isinstance(query, str) or not query.strip() or len(query) > 200:
+        raise ValueError("Enter a text search term (1–200 characters).")
+    needle = query.casefold()
+    matches = []
+    inspected = 0
+    for item in list_project_files(project_id):
+        if inspected >= 1200 or len(matches) >= limit:
+            break
+        suffix = Path(item["path"]).suffix.lower()
+        if suffix not in {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".xml", ".html", ".htm",
+                          ".css", ".js", ".jsx", ".ts", ".tsx", ".py", ".sql", ".toml", ".ini", ".cfg"}:
+            continue
+        if item["bytes"] > 256 * 1024:
+            continue
+        inspected += 1
+        try:
+            _, target = safe_workspace_path(project_id, item["path"])
+            content = target.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        for line_number, line in enumerate(content.splitlines(), start=1):
+            if needle in line.casefold():
+                matches.append({"path": item["path"], "line": line_number, "text": line.strip()[:400]})
+                if len(matches) >= limit:
+                    break
+    return {"matches": matches, "files_scanned": inspected, "truncated": len(matches) >= limit}
+
 
 
 def project_memory_path(project_id):
@@ -885,7 +1049,7 @@ def cleanup_project_servers():
 
 
 
-def run_project_command(project_id, command):
+def run_project_command(project_id, command, timeout_seconds=None):
     base = project_dir(project_id)
     if not isinstance(command, str) or not command.strip() or len(command) > 500:
         raise ValueError("Enter one supported command.")
@@ -910,12 +1074,32 @@ def run_project_command(project_id, command):
     elif executable in {"python", "python3", "py"}:
         if executable == "py" and args and args[0] == "-3":
             args = args[1:]
-        allowed = (
-            (len(args) >= 2 and args[0] == "-m" and args[1] in {"compileall", "pytest", "unittest"}
-             and all(SAFE_COMMAND_TOKEN_RE.fullmatch(arg) for arg in args))
-            or (args == ["-m", "pip", "install", "-r", "requirements.txt"]
-                and (base / "requirements.txt").is_file() and not (base / "requirements.txt").is_symlink())
+        module_allowed = (
+            len(args) >= 2 and args[0] == "-m"
+            and args[1] in {"compileall", "pytest", "unittest", "ruff", "mypy", "black"}
+            and all(SAFE_COMMAND_TOKEN_RE.fullmatch(arg) for arg in args)
         )
+        requirements_allowed = (
+            args == ["-m", "pip", "install", "-r", "requirements.txt"]
+            and (base / "requirements.txt").is_file() and not (base / "requirements.txt").is_symlink()
+        )
+        script_allowed = False
+        if args and Path(args[0]).suffix.lower() == ".py":
+            try:
+                _, script = safe_workspace_path(project_id, args[0])
+                script_allowed = script.is_file() and all(SAFE_COMMAND_TOKEN_RE.fullmatch(arg) for arg in args[1:])
+            except ValueError:
+                script_allowed = False
+        allowed = module_allowed or requirements_allowed or script_allowed
+    elif executable in {"node", "node.exe"}:
+        script_allowed = False
+        if len(args) == 1 and Path(args[0]).suffix.lower() in {".js", ".mjs", ".cjs"}:
+            try:
+                _, script = safe_workspace_path(project_id, args[0])
+                script_allowed = script.is_file()
+            except ValueError:
+                script_allowed = False
+        allowed = script_allowed
     elif executable == "git":
         allowed = (
             args in (["status"], ["status", "--short"], ["diff"], ["diff", "--stat"])
@@ -928,6 +1112,13 @@ def run_project_command(project_id, command):
         )
     if any(not SAFE_COMMAND_TOKEN_RE.fullmatch(arg) or ".." in arg or arg.startswith("/") for arg in args):
         raise ValueError("Command contains an unsupported or out-of-project argument.")
+    default_timeout = 600 if (args in (["install"], ["ci"]) or args == ["-m", "pip", "install", "-r", "requirements.txt"]) else 300
+    if timeout_seconds is None:
+        command_timeout = default_timeout
+    else:
+        if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 600:
+            raise ValueError("Command timeout must be a whole number between 1 and 600 seconds.")
+        command_timeout = min(default_timeout, timeout_seconds)
     resolved = shutil.which(parts[0])
     if not resolved:
         raise ValueError(f"'{parts[0]}' is not installed or not on PATH.")
@@ -938,12 +1129,12 @@ def run_project_command(project_id, command):
             completed = subprocess.run(
                 [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command_line],
                 cwd=str(base), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=300 if (args in (["install"], ["ci"]) or args == ["-m", "pip", "install", "-r", "requirements.txt"]) else 120, shell=False
+                timeout=command_timeout, shell=False
             )
         else:
             completed = subprocess.run(
                 final_args, cwd=str(base), capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=300 if (args in (["install"], ["ci"]) or args == ["-m", "pip", "install", "-r", "requirements.txt"]) else 120, shell=False
+                encoding="utf-8", errors="replace", timeout=command_timeout, shell=False
             )
     except subprocess.TimeoutExpired as exc:
         output = (exc.stdout or "") + "\n" + (exc.stderr or "")
@@ -1478,12 +1669,63 @@ class Handler(SimpleHTTPRequestHandler):
             target.mkdir(parents=True, exist_ok=False)
             self.send_json(200, {"ok": True, "project": slug, "path": f"projects/{slug}"})
             return
+        if action == "choose_workspace":
+            selected = pick_workspace_folder()
+            if not selected:
+                self.send_json(200, {"ok": True, "cancelled": True})
+                return
+            self.send_json(200, {"ok": True, "workspace": selected})
+            return
+        if action == "forget_workspace":
+            workspace_id = payload.get("workspace")
+            if not isinstance(workspace_id, str) or workspace_id not in WORKSPACE_ROOTS:
+                raise ValueError("Select a registered local workspace first.")
+            forgotten = WORKSPACE_ROOTS.pop(workspace_id)
+            try:
+                save_workspace_roots()
+            except OSError as exc:
+                WORKSPACE_ROOTS[workspace_id] = forgotten
+                raise ValueError("Could not update the local workspace registry.") from exc
+            self.send_json(200, {"ok": True, "forgotten": workspace_id})
+            return
         if action == "list_projects":
             projects = []
             for entry in WORKSPACE_ROOT.iterdir():
                 if entry.is_dir() and not entry.is_symlink() and PROJECT_ID_RE.fullmatch(entry.name):
                     projects.append(entry.name)
-            self.send_json(200, {"ok": True, "projects": sorted(projects)})
+            projects.extend(WORKSPACE_ROOTS.keys())
+            project_labels = {key: value["name"] for key, value in WORKSPACE_ROOTS.items()}
+            project_paths = {key: value["path"] for key, value in WORKSPACE_ROOTS.items()}
+            self.send_json(200, {"ok": True, "projects": sorted(set(projects)),
+                                 "project_labels": project_labels, "project_paths": project_paths})
+            return
+        if action == "find_files":
+            self.send_json(200, {"ok": True, "files": find_project_files(project, payload.get("query"))})
+            return
+        if action == "search_text":
+            self.send_json(200, {"ok": True, **search_project_text(project, payload.get("query"))})
+            return
+        if action == "create_directory":
+            relative = payload.get("path")
+            _, target = safe_workspace_path(project, relative)
+            if target.exists() and not target.is_dir():
+                raise ValueError("A file already exists at this path.")
+            target.mkdir(parents=True, exist_ok=True)
+            self.send_json(200, {"ok": True, "path": relative})
+            return
+        if action == "move_file":
+            source_path = payload.get("source")
+            destination_path = payload.get("destination")
+            _, source = safe_workspace_path(project, source_path)
+            _, destination = safe_workspace_path(project, destination_path)
+            if not source.is_file() or source.is_symlink():
+                raise ValueError("The source file does not exist or is not a regular file.")
+            if destination.exists() or destination.is_symlink():
+                raise ValueError("A file or folder already exists at the destination.")
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            _, destination = safe_workspace_path(project, destination_path)
+            source.replace(destination)
+            self.send_json(200, {"ok": True, "source": source_path, "destination": destination_path})
             return
         if action == "list_files":
             self.send_json(200, {"ok": True, "files": list_project_files(project)})
@@ -1577,7 +1819,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(200, {"ok": True, "deleted": payload.get("path")})
             return
         if action == "run_command":
-            result = run_project_command(project, payload.get("command"))
+            result = run_project_command(project, payload.get("command"), payload.get("timeout_seconds"))
             self.send_json(200, {"ok": True, **result})
             return
         if action == "preview":
