@@ -2,6 +2,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,8 @@ from unittest.mock import patch
 import agent_process
 import agent_runtime
 import server
+
+PYTHON_EXECUTABLE = shutil.which("python") or shutil.which("python3")
 
 
 class AgentRuntimeStorageTests(unittest.TestCase):
@@ -64,8 +67,9 @@ class AgentRuntimeStorageTests(unittest.TestCase):
 
     def test_worker_restart_marks_running_job_paused_without_replaying_it(self):
         self._insert_job(current_tool='{"name":"workspace_terminal"}')
-        agent_runtime.mark_running_jobs_interrupted()
-        job = agent_runtime.get_job("job-test")
+        with patch("agent_runtime._dpapi", side_effect=lambda value, decrypt=False: bytes(value)):
+            agent_runtime.mark_running_jobs_interrupted()
+            job = agent_runtime.get_job("job-test")
         self.assertEqual(job["status"], "paused")
         self.assertIn("outcome may be unknown", job["last_error"])
         events = agent_runtime.get_events("job-test")
@@ -113,10 +117,9 @@ class GuardedProcessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "one command"):
             server.run_guarded_terminal("demo", "python -c \"print(1)\" & whoami")
 
-    @unittest.skipUnless(shutil_which := __import__("shutil").which("python") or __import__("shutil").which("python3"),
-                         "Python executable is not on PATH")
+    @unittest.skipUnless(PYTHON_EXECUTABLE, "Python executable is not on PATH")
     def test_guarded_terminal_runs_one_command_inside_workspace(self):
-        executable = Path(shutil_which).name
+        executable = Path(PYTHON_EXECUTABLE).name
         result = server.run_guarded_terminal("demo", executable + " -c \"print('terminal-ok')\"")
         self.assertEqual(result["exit_code"], 0)
         self.assertIn("terminal-ok", result["output"])
