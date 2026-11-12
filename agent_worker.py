@@ -431,7 +431,9 @@ def main() -> int:
                 last_activity = time.monotonic()
                 continue
             if now - last_activity >= runtime.WORKER_IDLE_SECONDS:
-                return 0
+                if runtime.release_worker_if_idle(pid):
+                    return 0
+                last_activity = time.monotonic()
             time.sleep(0.7)
     finally:
         runtime.worker_stopped(pid)
