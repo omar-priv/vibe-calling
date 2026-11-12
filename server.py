@@ -1049,7 +1049,7 @@ def cleanup_project_servers():
 
 
 
-def run_project_command(project_id, command):
+def run_project_command(project_id, command, timeout_seconds=None):
     base = project_dir(project_id)
     if not isinstance(command, str) or not command.strip() or len(command) > 500:
         raise ValueError("Enter one supported command.")
@@ -1116,18 +1116,25 @@ def run_project_command(project_id, command):
     if not resolved:
         raise ValueError(f"'{parts[0]}' is not installed or not on PATH.")
     final_args = [resolved] + args
+    default_timeout = 600 if (args in (["install"], ["ci"]) or args == ["-m", "pip", "install", "-r", "requirements.txt"]) else 300
+    if timeout_seconds is None:
+        command_timeout = default_timeout
+    else:
+        if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 600:
+            raise ValueError("Command timeout must be a whole number between 1 and 600 seconds.")
+        command_timeout = min(default_timeout, timeout_seconds)
     try:
         if os.name == "nt" and resolved.lower().endswith((".cmd", ".bat")):
             command_line = subprocess.list2cmdline(final_args)
             completed = subprocess.run(
                 [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command_line],
                 cwd=str(base), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=600 if (args in (["install"], ["ci"]) or args == ["-m", "pip", "install", "-r", "requirements.txt"]) else 300, shell=False
+                timeout=command_timeout, shell=False
             )
         else:
             completed = subprocess.run(
                 final_args, cwd=str(base), capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=600 if (args in (["install"], ["ci"]) or args == ["-m", "pip", "install", "-r", "requirements.txt"]) else 300, shell=False
+                encoding="utf-8", errors="replace", timeout=command_timeout, shell=False
             )
     except subprocess.TimeoutExpired as exc:
         output = (exc.stdout or "") + "\n" + (exc.stderr or "")
@@ -1812,7 +1819,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(200, {"ok": True, "deleted": payload.get("path")})
             return
         if action == "run_command":
-            result = run_project_command(project, payload.get("command"))
+            result = run_project_command(project, payload.get("command"), payload.get("timeout_seconds"))
             self.send_json(200, {"ok": True, **result})
             return
         if action == "preview":
