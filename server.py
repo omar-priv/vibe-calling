@@ -1927,8 +1927,9 @@ class Handler(SimpleHTTPRequestHandler):
             if not job:
                 raise ValueError("Agent job was not found.")
             events = agent_runtime.get_events(job_id, payload.get("after_id", 0))
+            approvals = agent_runtime.get_pending_approvals(job_id)
             self.send_json(200, {"ok": True, "job": job, "events": events,
-                                 "worker": agent_runtime.worker_status()})
+                                 "approvals": approvals, "worker": agent_runtime.worker_status()})
             return
         if action == "jobs":
             self.send_json(200, {"ok": True, "jobs": agent_runtime.list_recent_jobs(),
