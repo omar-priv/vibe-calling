@@ -19,7 +19,7 @@ from typing import Any
 APP_NAME = "VibeCalling"
 WORKER_IDLE_SECONDS = 45
 STALE_WORKER_SECONDS = 12
-MAX_JOB_BYTES = 2_500_000
+MAX_JOB_BYTES = 7_000_000
 
 
 def data_dir() -> Path:
@@ -167,7 +167,7 @@ def submit_job(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(provider, dict) or not isinstance(history, list) or not isinstance(tools, list):
         raise ValueError("Provider, conversation history, and tool schemas are required.")
     if len(json.dumps(payload, ensure_ascii=False)) > MAX_JOB_BYTES:
-        raise ValueError("Agent job context exceeds the 2.5 MB limit.")
+        raise ValueError("Agent job context exceeds the 7 MB local limit.")
     api_key = provider.pop("apiKey", None)
     secret = protect_secret(api_key)
     if not isinstance(provider.get("baseUrl"), str) or not isinstance(provider.get("model"), str):

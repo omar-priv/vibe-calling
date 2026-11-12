@@ -119,7 +119,7 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         (server.WORKSPACE_ROOT / "demo" / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
         completed = type("Completed", (), {"returncode": 0, "stdout": "installed", "stderr": ""})()
         with patch.object(server.shutil, "which", return_value="/usr/bin/python"):
-            with patch.object(server.subprocess, "run", return_value=completed) as run:
+            with patch("agent_process.run", return_value=completed) as run:
                 result = server.run_project_command("demo", "python -m pip install -r requirements.txt")
         self.assertEqual(result["exit_code"], 0)
         run.assert_called_once()
@@ -153,7 +153,7 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         (root / "check.py").write_text("print('ok')", encoding="utf-8")
         with patch.object(server.shutil, "which", return_value="/usr/bin/python"):
             completed = type("Completed", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
-            with patch.object(server.subprocess, "run", return_value=completed) as run:
+            with patch("agent_process.run", return_value=completed) as run:
                 result = server.run_project_command("demo", "python check.py", timeout_seconds=17)
         self.assertEqual(result["exit_code"], 0)
         run.assert_called_once()
