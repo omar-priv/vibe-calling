@@ -18,15 +18,17 @@ No Node.js, npm, Docker, frontend build, or database is required to run the appl
 - Free-model-only discovery. NVIDIA NIM has a curated, newest-first catalog of 12 Free Endpoint models with documented Chat Completions examples. Gemini uses a curated Flash allowlist. OpenRouter models must be marked `:free` or provide zero pricing metadata. Other providers require explicit zero pricing metadata.
 - Multi-conversation chat history with individual conversation deletion.
 - Quick Web Research and Deep Research modes in the chat composer. Both use the selected model; search runs through the local DuckDuckGo HTML connector and cite opened HTTPS sources.
-- Agent mode with resumable, long-running tasks, automatic checkpoints every 500 model turns / 2,000 tool calls, configurable run windows (1, 3, 5, 8 hours or no time limit), visible runtime/tool counters, project memory, and stop/resume controls.
+- Agent mode with a detached local Windows worker, durable SQLite queue, DPAPI-protected task history/checkpoints/provider keys, resumable long-running jobs, event history, per-action approvals, and configurable run windows (1, 3, 5, 8 hours or no time limit). Closing the browser tab does not stop an accepted background job.
 - Open an existing local project folder through the native Windows folder picker; registered folder paths stay in a private local registry ignored by Git. The Agent can list, search, read, write, create, move, and delete supported project files inside the selected workspace.
 - Twenty-three built-in Agent Skills covering planning, coding mentorship, independent/adversarial review, visual-reference research, UX, frontend/backend development, accessibility, API/MCP integration, browser testing, debugging, performance, security, code review, web research, and release management.
 - Import your own skills as a `.md` file or a `.zip` package containing one `SKILL.md`.
 - Attach up to three files to a chat message (2 MB each; 4 MB total). Supported formats include common text/code files and PNG/JPG/WEBP/GIF images.
 - Agent-generated project files can be returned as direct download links in chat.
 - In-app GitHub MCP plus configurable remote Streamable HTTP MCP connections. Read-only mode is enabled by default; write-capable or unclassified tools require per-call confirmation.
+- Optional Playwright browser automation in a separate Vibe Calling browser profile, plus opt-in Windows Computer Use through UI Automation (`pywinauto`). Both are disabled until the user enables them and installs their optional dependencies.
+- Guarded Terminal for one command at a time, with explicit approval, no shell chaining, sanitized environment variables, process-tree termination, and Windows Job Object resource controls where available.
 - The chat transcript scrolls independently while the message composer remains fixed in the application layout.
-- A Remote Browser / Computer Use panel is marked as planned Beta only. No remote browser service is connected in this release.
+- The browser and desktop automation run locally on the user's own Windows session; this is not a remote hosted browser service.
 
 ## NVIDIA free chat catalog
 
@@ -80,19 +82,21 @@ See [docs/agent-tools-and-mcp.md](docs/agent-tools-and-mcp.md) for the setup and
 - Provider API keys, the GitHub PAT, and remote MCP bearer tokens are stored in browser local storage. They persist after reloads but are not encrypted by this app. Avoid shared browser profiles.
 - The local proxy never saves or logs provider request bodies or credentials. It restricts outbound requests to HTTPS and pins each validated public IP at connection time to prevent DNS-rebinding SSRF. Outbound HTTPS deliberately bypasses system proxy environment variables; proxy-only networks are not supported in this build.
 - Workspace tools operate only inside an agent-created project or a folder explicitly selected through the native folder picker. They reject path traversal, symbolic links, common secret directories (`secrets`, `.aws`, `.ssh`, `.kube`, and similar), credential files, and private keys. Selected folder paths are stored in `.workspace-roots.json`, which is ignored by Git. Static project previews run on a separate ephemeral localhost port (a separate browser origin), so project JavaScript cannot read Vibe Calling's localStorage. Preview still executes the project's own code; preview only projects you trust.
-- Approved project commands execute on the user's computer. Confirm mode asks before command execution, deletion, file moves, and starting project servers. Trusted mode can skip those repeated prompts only for the workspace that was selected when the task began; it does not sandbox executed code. The allowlist and confirmation dialog are safeguards, not an OS-level sandbox. Static preview isolates the browser origin only; it is not a process/container sandbox and does not make hostile project code safe to run.
+- Project commands execute on the user's computer. Confirm mode asks before allowlisted commands, deletion, file moves, and starting project servers. Trusted mode can skip repeated prompts only for supported workspace actions in the workspace selected when the task began. Guarded Terminal always asks for approval, even in Trusted mode. It executes under the current Windows account; Job Objects can constrain process trees, active child count, and memory, but do not provide filesystem or network isolation. This build does NOT claim to be a full OS sandbox. Static preview isolates the browser origin only; it is not a process/container sandbox and does not make hostile project code safe to run.
 - GitHub and remote MCP write actions are off by default. Remote MCP tool calls require per-call confirmation even when the remote server labels a tool read-only, because that annotation is advisory. Only grant narrow permissions and approve actions you understand.
 - The generic remote MCP connector supports HTTPS Streamable HTTP with optional Bearer authentication; OAuth and local stdio processes are not supported.
 - Uploaded files are stored locally and are not executed by the upload feature.
 
 ## Known limitations
 
-- Agent mode streams responses when the selected provider supports OpenAI-compatible SSE; regular chat remains non-streaming.
+- Background Agent mode uses non-streaming provider calls for durable execution. The older in-tab agent loop remains available when Background Agent is disabled or when using Web/Deep Research.
 - Provider support for tool calls and images varies. A non-vision model may reject image attachments.
 - Chat attachments do not yet support PDF, Word, audio, or video files.
-- Static projects can be previewed from `index.html`. The workspace can also start supported Vite, Next.js, FastAPI, and Flask development servers. Other runtimes are not automatically detected. The task loop runs in the browser tab; keep Vibe Calling open and the computer awake during long runs. A saved checkpoint can be resumed after interruption, but work does not continue as a hidden Windows background service after the app is closed.
-- Browser-testing skill guides testing, but this edition does not include a real browser automation engine or server-hosted computer use.
-- Remote Browser / Computer Use is a planned Beta panel only; no browser session is currently running on a server.
+- Background Agent jobs continue after the browser tab closes and may continue if the main UI server is closed. They still require the Windows user session and computer to remain running and awake. They are not installed as a Windows Service or scheduled to auto-start after reboot/logoff. After a crash or restart, an in-flight action is never replayed automatically; the job is paused and must be resumed after inspecting the action's outcome.
+- Browser Automation is optional and requires Playwright plus its Chromium runtime. It uses a separate persistent Vibe Calling profile, not the user's normal Chrome profile. It blocks local/private IP destinations and only supports HTTP/HTTPS public web pages.
+- Windows Computer Use is optional and requires pywinauto. It uses the currently logged-in, unlocked Windows desktop; it cannot control a locked/logged-out or sleeping session. The UIA backend can be incomplete for canvas-rendered applications.
+- Guarded Terminal is more flexible than the old allowlist but deliberately remains a one-command-at-a-time tool without shell chaining. It always asks for approval and executes under the current Windows account. It is not an OS-level filesystem/network sandbox.
+- A true sandbox is not yet integrated. Microsoft MXC exposes policy-based isolation APIs, but the current Windows ProcessContainer backend is documented for supported Windows 11 builds; this Windows 10-compatible release does not silently fall back to an unsandboxed terminal while claiming isolation. See [background runtime and security notes](docs/background-agent-runtime.md).
 - Free-model discovery is conservative. Providers that do not disclose free pricing may return an empty model list rather than showing unverified paid models.
 - API provider feature support varies by model and account quota.
 
@@ -109,7 +113,12 @@ A separate private hosted launcher is provided in hosted_server.py. It is design
 - `index.html` — interface and embedded application script.
 - `app.js` — editable source of the embedded application script; keep both copies synchronized.
 - `styles.css` — visual system and layout.
-- `server.py` — local server, provider proxy, skill manager, attachments, downloads, project memory/runtime controls, GitHub MCP, and remote MCP transport.
+- `server.py` — local server, provider proxy, skill manager, attachments, downloads, project memory/runtime controls, GitHub MCP, remote MCP transport, and background-worker API.
+- `agent_runtime.py` — DPAPI-protected SQLite job queue, event journal, approval persistence, and worker lifecycle.
+- `agent_worker.py` — detached Agent loop that survives browser-tab closure.
+- `agent_automation.py` — optional Playwright and Windows UI Automation adapters.
+- `agent_process.py` — process-tree and resource controls using Windows Job Objects where available.
+- `automation-requirements.txt` / `install-automation.bat` — optional automation dependencies; not needed for the core app.
 - `skills/` — built-in agent skills.
 - `user_skills/` — imported personal skills (ignored by Git).
 - `projects/` — agent-created projects and chat uploads.
