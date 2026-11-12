@@ -1335,7 +1335,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = urlsplit(self.path).path
-        if route not in {"/api/proxy", "/api/workspace", "/api/skills", "/api/mcp/github", "/api/mcp/remote", "/api/research"}:
+        if route not in {"/api/proxy", "/api/workspace", "/api/skills", "/api/mcp/github", "/api/mcp/remote", "/api/research", "/api/agent-worker"}:
             self.send_json(404, {"error": "Unknown local API route."})
             return
         host_header = (self.headers.get("Host") or "").lower()
@@ -1370,6 +1370,8 @@ class Handler(SimpleHTTPRequestHandler):
                 self.handle_github_mcp(payload)
             elif route == "/api/mcp/remote":
                 self.handle_remote_mcp(payload)
+            elif route == "/api/agent-worker":
+                self.handle_agent_worker(payload)
             else:
                 self.handle_research(payload)
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -1832,6 +1834,70 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(200, {"ok": True, "kind": "static", "path": "index.html", **preview})
             return
         raise ValueError("Unknown workspace action.")
+
+
+    def handle_agent_worker(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError("Invalid Agent worker request.")
+        import agent_runtime
+        action = payload.get("action")
+        if action == "capabilities":
+            try:
+                import agent_automation
+                automation = agent_automation.capabilities()
+            except Exception:
+                automation = {"browser": False, "computer": False, "platform": sys.platform}
+            self.send_json(200, {"ok": True, "worker": agent_runtime.worker_status(),
+                                 "automation": automation, "storage": "DPAPI + SQLite" if os.name == "nt" else "Windows-only worker"})
+            return
+        if action == "enqueue":
+            job = payload.get("job")
+            if not isinstance(job, dict):
+                raise ValueError("Agent job payload is required.")
+            result = agent_runtime.submit_job(job)
+            try:
+                worker = agent_runtime.ensure_worker()
+            except Exception:
+                # Preserve the queued task for inspection; never pretend it started.
+                agent_runtime.add_event(result["job_id"], "worker_start_failed",
+                                        "The task was saved but the background worker could not start.")
+                raise
+            self.send_json(200, {"ok": True, **result, "worker": worker})
+            return
+        if action == "status":
+            job_id = payload.get("job_id")
+            if not isinstance(job_id, str) or len(job_id) > 80:
+                raise ValueError("A valid Agent job ID is required.")
+            job = agent_runtime.get_job(job_id)
+            if not job:
+                raise ValueError("Agent job was not found.")
+            events = agent_runtime.get_events(job_id, payload.get("after_id", 0))
+            self.send_json(200, {"ok": True, "job": job, "events": events,
+                                 "worker": agent_runtime.worker_status()})
+            return
+        if action == "jobs":
+            self.send_json(200, {"ok": True, "jobs": agent_runtime.list_recent_jobs(),
+                                 "worker": agent_runtime.worker_status()})
+            return
+        if action == "approve":
+            approval_id = payload.get("approval_id")
+            if not isinstance(approval_id, str) or len(approval_id) > 80 or not isinstance(payload.get("approved"), bool):
+                raise ValueError("Approval ID and boolean decision are required.")
+            self.send_json(200, agent_runtime.approve_action(approval_id, payload["approved"]))
+            return
+        if action == "cancel":
+            job_id = payload.get("job_id")
+            if not isinstance(job_id, str) or len(job_id) > 80:
+                raise ValueError("A valid Agent job ID is required.")
+            self.send_json(200, agent_runtime.request_cancel(job_id))
+            return
+        if action == "resume":
+            job_id = payload.get("job_id")
+            if not isinstance(job_id, str) or len(job_id) > 80:
+                raise ValueError("A valid Agent job ID is required.")
+            self.send_json(200, agent_runtime.resume_job(job_id))
+            return
+        raise ValueError("Unknown Agent worker action.")
 
     def handle_proxy(self, payload):
         if not isinstance(payload, dict):
