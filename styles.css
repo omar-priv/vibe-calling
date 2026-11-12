@@ -1066,3 +1066,137 @@ body {
  .research-mode-control select{max-width:116px;min-width:86px}
  .history-delete{opacity:1}
 }
+
+
+/* Local autonomous agent controls and workspace interactions */
+.agent-session-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+}
+.agent-session-controls label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: .35px;
+}
+.agent-session-controls select {
+  min-width: 112px;
+  max-width: 176px;
+  min-height: 32px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0;
+}
+.agent-session-controls select:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.agent-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 7px 16px;
+  margin: 3px 0 11px 45px;
+  color: var(--muted);
+  font: 10px/1.5 "DM Mono", monospace;
+}
+.agent-live-head strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.agent-live-tools li {
+  animation: agent-step-in .2s ease both;
+}
+@keyframes agent-step-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.workspace-folder-hint {
+  margin: 9px 0 14px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.65;
+}
+.workspace-search-row {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 8px;
+}
+.workspace-search-row .field { min-width: 0; flex: 1 1 240px; }
+.workspace-search-results {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  color: var(--text);
+  font: 10px/1.65 "DM Mono", monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.workspace-files {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 10px/1.7 "DM Mono", monospace;
+}
+#openWorkspaceFolderBtn {
+  white-space: nowrap;
+}
+button, select, input, textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+button, .nav-item, .suggestion, .tool-button, .primary-button, .secondary-button {
+  transition: transform .16s ease, border-color .16s ease, background-color .16s ease, box-shadow .16s ease, opacity .16s ease;
+}
+button:active:not(:disabled) {
+  transform: translateY(1px) scale(.985);
+}
+button:disabled, select:disabled {
+  cursor: not-allowed;
+}
+:where(button, input, textarea, select, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
+.workspace-panel, .provider-card, .tool-card, .settings-panel {
+  animation: panel-arrive .24s ease both;
+}
+@keyframes panel-arrive {
+  from { opacity: .78; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (max-width: 980px) {
+  .toolbar-right { flex-wrap: wrap; justify-content: flex-end; }
+  .agent-session-controls { margin-left: 0; }
+}
+@media (max-width: 760px) {
+  .agent-session-controls {
+    width: 100%;
+    margin: 0;
+    justify-content: flex-end;
+  }
+  .agent-session-controls label { flex: 1 1 120px; }
+  .agent-session-controls select { width: 100%; max-width: none; }
+  .workspace-search-row { align-items: stretch; }
+  .workspace-search-row button { flex: 0 0 auto; }
+  .agent-run-meta { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
