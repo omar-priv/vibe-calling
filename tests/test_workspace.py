@@ -332,8 +332,14 @@ class FrontendBundleTests(unittest.TestCase):
                            "saveRemoteMcpSettings", "connectRemoteMcp",
                            "nvidiaCatalogGrid", "researchMode", "remoteBrowserHeading", "startProjectBtn", "stopProjectBtn", "projectMemoryPreview", "projectRuntimeStatus",
                            "openWorkspaceFolderBtn", "workspaceSearchInput", "workspaceSearchBtn", "workspaceSearchResults",
-                           "agentDuration", "agentPermissionMode", "agentRunClock", "agentRunUsage"):
+                           "agentDuration", "agentPermissionMode", "agentRunClock", "agentRunUsage", "forgetWorkspaceBtn"):
             self.assertIn('id="' + element_id + '"', html)
+
+    def test_private_workspace_registry_is_ignored_by_git(self):
+        root = Path(__file__).resolve().parents[1]
+        ignore = (root / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn(".workspace-roots.json", ignore)
+        self.assertIn(".workspace-roots.json.tmp", ignore)
 
     def test_chat_switch_and_delete_are_blocked_during_active_response(self):
         root = Path(__file__).resolve().parents[1]
