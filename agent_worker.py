@@ -102,6 +102,8 @@ def _project(args: dict, payload: dict) -> str:
 def _approval_required(name: str, args: dict, payload: dict) -> tuple[bool, str]:
     project = args.get("project") or payload.get("activeProject") or ""
     trusted = payload.get("permissionMode") == "trusted" and project and project == payload.get("permissionWorkspaceId")
+    if name == "workspace_terminal":
+        return (True, "A terminal command runs with your Windows account's permissions. This is not an OS filesystem sandbox.")
     if name in {"workspace_delete_file", "workspace_move_file", "workspace_run_command", "workspace_start_project"}:
         return (not trusted, "This action can change files or execute project code on your Windows account.")
     if name.startswith("computer_") and name not in {"computer_list_windows", "computer_inspect_window", "computer_screenshot"}:
@@ -256,6 +258,12 @@ def execute_tool(job_id: str, name: str, args: dict, payload: dict) -> str:
         if result["exit_code"] != 0:
             raise RuntimeError("Command failed with exit code " + str(result["exit_code"]) + ":\n" + result["output"])
         return "Command succeeded.\n" + result["output"]
+    if name == "workspace_terminal":
+        result = server.run_guarded_terminal(_project(args, payload), args.get("command"))
+        if result["exit_code"] != 0:
+            raise RuntimeError("Terminal command failed with exit code " + str(result["exit_code"]) +
+                               (" (timed out)" if result.get("timed_out") else "") + ":\n" + result["output"])
+        return "Terminal command completed (exit code 0).\n" + result["output"]
     if name == "workspace_start_project":
         result = server.start_project_server(_project(args, payload))
         return "Started " + str(result.get("runtime")) + " at " + str(result.get("url"))
@@ -298,6 +306,7 @@ def run_job(job_id: str) -> None:
         # Re-base the run window when the job is first picked up or resumed.
         if not deadline or cp.get("resume_window"):
             deadline = int(time.time() * 1000) + max_runtime
+        cp.pop("resume_window", None)
         payload["deadlineAt"] = deadline
     else:
         payload["deadlineAt"] = 0
