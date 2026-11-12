@@ -52,18 +52,23 @@ Uploaded files are stored in the active local project under `uploads/`. The agen
 ## Local project workspace
 
 Agent mode can:
-
-- Create and list projects.
-- List, read, and write UTF-8 project files.
+- Create and list projects, or open an existing folder using the native Windows folder picker.
+- List, find, and search text in supported UTF-8 files.
+- Read and write files, create directories, move/rename files, and delete individual files.
 - Preview a static `index.html` from a separate ephemeral localhost origin.
-- Delete an individual file only after a confirmation dialog.
-- Run a small command allowlist only after user approval.
+- Run the supported command allowlist, including project scripts, linters and tests.
+- Keep project memory and resumable task checkpoints.
+- Run for a selected window (1, 3, 5, 8 hours, or no time cap) and show a live timer, turn count and tool count.
 
-Projects live under `projects/<project-id>/`. Filesystem access blocks parent traversal, absolute paths, symbolic links, `.env` files, common secret directories such as `secrets/`, `.aws/`, `.ssh/`, `.kube/`, credential files (including YAML), private keys, and dependency/build folders. Individual workspace text files are limited to 2 MB.
+Agent-created projects live under `projects/<project-id>/`. A folder selected by the user is registered by a generated ID in `.workspace-roots.json`; that file contains absolute paths and is ignored by Git. The model can only address the folder selected by the user, not supply an arbitrary filesystem root. Both workspace types reject path traversal, symbolic links, `.env` and credential files, common secret directories such as `secrets/`, `.aws/`, `.ssh/`, `.kube/`, private keys, and dependency/build folders. Individual workspace text files are limited to 2 MB. File search skips ignored folders and binary files.
 
-### Execution boundary
+### Approval profiles
 
-The Python server binds only to `127.0.0.1`. Approved project scripts and commands execute on the user's computer. The command allowlist is not an OS-level sandbox. Dynamic preview servers, unrestricted terminals, and actual browser automation are not available yet.
+- **Confirm actions** (default): file edits inside the selected workspace are allowed, while delete, move/rename, project commands, and starting a development server ask for confirmation.
+- **Autonomous · active folder**: after a separate warning and user consent, the agent may delete/move files and run allowlisted project commands without repeating confirmations, but only inside the exact workspace selected when that task started. The permission does not follow the agent if it creates or selects another project.
+- GitHub MCP and remote MCP write actions retain their own per-call approval controls.
+
+The Python server binds only to `127.0.0.1`. Project commands execute on the user's computer. The command allowlist is not an OS-level sandbox: a project script can still access resources available to the Windows user account. Only enable autonomous mode for code you trust. Long-running tasks execute in the browser tab; keep the tab open and the computer awake. Checkpoints let you resume after a tab/browser interruption, but this is not a Windows background service. Dynamic preview servers are supported only for the existing Vite, Next.js, FastAPI, and Flask launch patterns; actual browser automation and computer use are not connected yet.
 
 ## What is MCP?
 
