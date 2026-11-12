@@ -1200,3 +1200,11 @@ button:disabled, select:disabled {
     transition-duration: .01ms !important;
   }
 }
+
+#forgetWorkspaceBtn[hidden] { display: none !important; }
+.workspace-status { overflow-wrap: anywhere; }
+.agent-session-controls select:focus-visible,
+.workspace-search-row .field:focus-visible {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 16%, transparent);
+}
