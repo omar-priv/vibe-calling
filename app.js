@@ -649,7 +649,7 @@ async function runTool(name,a){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
   const warning="The agent wants to run this allowlisted command in project '"+project+"':\n\n"+a.command+"\n\nThis may install packages or run project scripts on your computer. Only approve if you trust the project and command.\n\nRun it?";
   if(!(activeAgentPermissionMode==="trusted"&&project===activeAgentPermissionWorkspaceId)&&!confirm(warning))return "User declined command execution. Do not retry unless the user asks.";
-  const remainingSeconds=Number(pendingAgentRun?.deadlineAt)>0?Math.max(1,Math.floor((Number(pendingAgentRun.deadlineAt)-Date.now())/1000)):undefined;
+  const remainingSeconds=Number(pendingAgentRun?.deadlineAt)>0?Math.min(600,Math.max(1,Math.floor((Number(pendingAgentRun.deadlineAt)-Date.now())/1000))):undefined;
   const data=await workspaceRequest({action:"run_command",project,command:a.command,timeout_seconds:remainingSeconds});
   if(data.exit_code!==0)throw new Error("Command failed with exit code "+data.exit_code+(data.timed_out?" (timed out)":"")+". Output:\n"+(data.output||"(No command output)"));
   return "Command succeeded (exit code 0).\n\n"+(data.output||"(No command output)");
