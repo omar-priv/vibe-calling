@@ -7,13 +7,14 @@ const AGENT_RESUME_KEY="vc_agent_resume_v1";
 const WORKER_JOBS_KEY="vc_background_agent_jobs_v1";
 const AUTOMATION_PREFS_KEY="vc_agent_automation_prefs_v1";
 const defaultAutomationPrefs={background:true,browser:false,computer:false,terminal:true};
-let automationPrefs={...defaultAutomationPrefs,...read(AUTOMATION_PREFS_KEY,{})};
-let activeWorkerWatchers=new Set();
 const AGENT_MAX_TURNS_PER_RUN=500;
 const AGENT_MAX_TOOL_CALLS_PER_RUN=2000;
 const AGENT_RESUME_MAX_CHARS=2500000;
 const presets={custom:{name:"Custom provider",url:"",model:""},nvidia:{name:"NVIDIA NIM",url:"https://integrate.api.nvidia.com/v1",model:""},gemini:{name:"Google Gemini",url:"https://generativelanguage.googleapis.com/v1beta/openai",model:""},openai:{name:"OpenAI",url:"https://api.openai.com/v1",model:"gpt-4o-mini"},openrouter:{name:"OpenRouter",url:"https://openrouter.ai/api/v1",model:""},groq:{name:"Groq",url:"https://api.groq.com/openai/v1",model:""}};
 const read=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},write=(k,v)=>localStorage.setItem(k,JSON.stringify(v));
+const isLocalRuntime=()=>["127.0.0.1","localhost","::1"].includes(String(location.hostname||"").toLowerCase());
+let automationPrefs={...defaultAutomationPrefs,...read(AUTOMATION_PREFS_KEY,{})};
+let activeWorkerWatchers=new Set();
 let providers=read(KEYS.providers,[]),chats=read(KEYS.chats,[]),notes=read(KEYS.notes,[]);
 let researchMode=read(KEYS.researchMode,"off");
 if(!["off","web","deep"].includes(researchMode))researchMode="off";
@@ -551,6 +552,12 @@ async function restoreBackgroundAgentJobs(){
  }
 }
 async function refreshAgentWorkerStatus(){
+ if(!isLocalRuntime()){
+  renderWorkerStatus("Local-only feature","Background worker and desktop automation are available only in the Windows local edition.");
+  ["#enableBackgroundWorker","#enableBrowserAutomation","#enableComputerUse","#enableGuardedTerminal","#refreshAgentWorkerStatusBtn","#resumeBackgroundAgentBtn","#cancelBackgroundAgentBtn"].forEach(selector=>{const el=$(selector);if(el)el.disabled=true;});
+  ["#browserDependencyStatus","#computerDependencyStatus"].forEach(selector=>{const el=$(selector);if(el)el.textContent="Available only in the local Windows edition.";});
+  return;
+ }
  try{
   const data=await agentWorkerRequest({action:"capabilities"});
   const worker=data.worker||{};
@@ -1249,7 +1256,7 @@ async function send(text,attachments=[]){
    const maxRuntimeMs=durationMinutes===0?0:durationMinutes*60*1000;
    const permissionMode=$("#agentPermissionMode")?.value==="trusted"&&!!activeProject?"trusted":"confirm";
    state={chatId,providerId:q.provider.id,model:q.model,history,used:[],step:0,turns:0,turnBudget:AGENT_MAX_TURNS_PER_RUN,toolCalls:0,toolBudget:AGENT_MAX_TOOL_CALLS_PER_RUN,pendingToolCalls:[],pendingToolIndex:0,pendingToolStatus:"",repeatStreak:0,recentToolOutcomes:[],emptyResponses:0,pauseReason:"",researchMode:researchEnabled?researchMode:"off",prompt:text,permissionMode,permissionWorkspaceId:permissionMode==="trusted"?activeProject:"",maxRuntimeMs,startedAt:Date.now(),deadlineAt:maxRuntimeMs?Date.now()+maxRuntimeMs:0};
-   if(!researchEnabled&&automationPrefs.background!==false){
+   if(!researchEnabled&&automationPrefs.background!==false&&isLocalRuntime()){
     try{await startBackgroundAgent(state,q.provider,spinner)}
     catch(workerError){
      spinner?.remove();
@@ -1404,6 +1411,7 @@ $("#researchMode").addEventListener("change",e=>{researchMode=["off","web","deep
 $("#projectSelect").addEventListener("change",e=>{setActiveProject(e.target.value);refreshWorkspacePanel()});
 $("#skillFileInput").addEventListener("change",async e=>{for(const file of [...e.target.files])await installSkillFile(file);e.target.value=""});
 function saveAutomationPref(key,value){
+ if(!isLocalRuntime()){toast("This feature is available only in the local Windows edition.");return;}
  automationPrefs={...automationPrefs,[key]:!!value};write(AUTOMATION_PREFS_KEY,automationPrefs);
  if(key==="browser"||key==="computer")toast("Automation setting saved. Optional dependencies may be required.");
 }
