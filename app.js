@@ -14,7 +14,7 @@ let researchMode=read(KEYS.researchMode,"off");
 if(!["off","web","deep"].includes(researchMode))researchMode="off";
 if(!Array.isArray(providers))providers=[];if(!Array.isArray(chats))chats=[];if(!Array.isArray(notes))notes=[];
 let chatId=chats[0]?.id||null,editingId=null,busy=false,controller=null,pendingModels=[],pendingFreeSource="";
-let activeAgentPermissionMode="confirm",agentClockTimer=null;
+let activeAgentPermissionMode="confirm",activeAgentPermissionWorkspaceId="",agentClockTimer=null;
 let mcpConfig=read(KEYS.mcp,{token:"",readOnly:true,sessionId:"",connected:false});
 if(!mcpConfig||typeof mcpConfig!=="object")mcpConfig={token:"",readOnly:true,sessionId:"",connected:false};
 let githubMcpTools=[],githubMcpToolMap={},remoteMcpTools=[],remoteMcpToolMap={},skillCatalog=[],pendingAttachments=[];
@@ -607,6 +607,7 @@ async function runTool(name,a){
  }
  if(name==="workspace_move_file"){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or open a workspace first.");
+  if(!(activeAgentPermissionMode==="trusted"&&project===activeAgentPermissionWorkspaceId)&&!confirm("The agent wants to move or rename this file:\n\n"+a.source+" → "+a.destination+"\n\nAllow this change?"))return "User declined the file move.";
   const data=await workspaceRequest({action:"move_file",project,source:a.source,destination:a.destination});
   if(project===activeProject)await refreshWorkspacePanel();
   return "Moved "+data.source+" to "+data.destination+".";
@@ -636,7 +637,7 @@ async function runTool(name,a){
  }
  if(name==="workspace_delete_file"){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
-  if(!(activeAgentPermissionMode==="trusted"&&project===activeProject)&&!confirm("The agent wants to permanently delete this file:\n\n"+project+"/"+a.path+"\n\nAllow this deletion?"))return "User declined the file deletion.";
+  if(!(activeAgentPermissionMode==="trusted"&&project===activeAgentPermissionWorkspaceId)&&!confirm("The agent wants to permanently delete this file:\n\n"+project+"/"+a.path+"\n\nAllow this deletion?"))return "User declined the file deletion.";
   const data=await workspaceRequest({action:"delete_file",project,path:a.path,confirmed:true});
   if(project===activeProject)await refreshWorkspacePanel();
   return "Deleted "+data.deleted+".";
@@ -644,14 +645,14 @@ async function runTool(name,a){
  if(name==="workspace_run_command"){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
   const warning="The agent wants to run this allowlisted command in project '"+project+"':\n\n"+a.command+"\n\nThis may install packages or run project scripts on your computer. Only approve if you trust the project and command.\n\nRun it?";
-  if(!(activeAgentPermissionMode==="trusted"&&project===activeProject)&&!confirm(warning))return "User declined command execution. Do not retry unless the user asks.";
+  if(!(activeAgentPermissionMode==="trusted"&&project===activeAgentPermissionWorkspaceId)&&!confirm(warning))return "User declined command execution. Do not retry unless the user asks.";
   const data=await workspaceRequest({action:"run_command",project,command:a.command});
   if(data.exit_code!==0)throw new Error("Command failed with exit code "+data.exit_code+(data.timed_out?" (timed out)":"")+". Output:\n"+(data.output||"(No command output)"));
   return "Command succeeded (exit code 0).\n\n"+(data.output||"(No command output)");
  }
  if(name==="workspace_start_project"){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
-  if(!(activeAgentPermissionMode==="trusted"&&project===activeProject)&&!confirm("Start this project's development process on your computer? The project code will run locally. Only approve trusted files."))return "User declined starting the project server.";
+  if(!(activeAgentPermissionMode==="trusted"&&project===activeAgentPermissionWorkspaceId)&&!confirm("Start this project's development process on your computer? The project code will run locally. Only approve trusted files."))return "User declined starting the project server.";
   const data=await workspaceRequest({action:"start_project",project});
   if(project===activeProject)await refreshWorkspacePanel();
   return "Development server started. Runtime: "+data.runtime+". URL: "+data.url+" (local computer only). PID: "+data.pid;
@@ -903,6 +904,7 @@ function recoverInterruptedAgentTool(state){
 }
 async function runAgentLoop(state,spinner){
  activeAgentPermissionMode=state.permissionMode==="trusted"?"trusted":"confirm";
+ activeAgentPermissionWorkspaceId=activeAgentPermissionMode==="trusted"?String(state.permissionWorkspaceId||""):"";
  const provider=byId(state.providerId);if(!provider)throw new Error("The provider used by this task is no longer saved. Select it again and resend the request.");
  state.turns=Number.isFinite(state.turns)?state.turns:(Number(state.step)||0);
  state.step=state.turns;
@@ -1041,7 +1043,7 @@ async function send(text,attachments=[]){
    const durationMinutes=selectedAgentDuration();
    const maxRuntimeMs=durationMinutes===0?0:durationMinutes*60*1000;
    const permissionMode=$("#agentPermissionMode")?.value==="trusted"&&!!activeProject?"trusted":"confirm";
-   state={chatId,providerId:q.provider.id,model:q.model,history,used:[],step:0,turns:0,turnBudget:AGENT_MAX_TURNS_PER_RUN,toolCalls:0,toolBudget:AGENT_MAX_TOOL_CALLS_PER_RUN,pendingToolCalls:[],pendingToolIndex:0,pendingToolStatus:"",repeatStreak:0,recentToolOutcomes:[],emptyResponses:0,pauseReason:"",researchMode:researchEnabled?researchMode:"off",prompt:text,permissionMode,maxRuntimeMs,startedAt:Date.now(),deadlineAt:maxRuntimeMs?Date.now()+maxRuntimeMs:0};
+   state={chatId,providerId:q.provider.id,model:q.model,history,used:[],step:0,turns:0,turnBudget:AGENT_MAX_TURNS_PER_RUN,toolCalls:0,toolBudget:AGENT_MAX_TOOL_CALLS_PER_RUN,pendingToolCalls:[],pendingToolIndex:0,pendingToolStatus:"",repeatStreak:0,recentToolOutcomes:[],emptyResponses:0,pauseReason:"",researchMode:researchEnabled?researchMode:"off",prompt:text,permissionMode,permissionWorkspaceId:permissionMode==="trusted"?activeProject:"",maxRuntimeMs,startedAt:Date.now(),deadlineAt:maxRuntimeMs?Date.now()+maxRuntimeMs:0};
    saveAgentResume(state);await runAgentLoop(state,spinner);
   }else{
    setAgentProgress("Waiting for provider response…");
@@ -1069,6 +1071,7 @@ async function continueAgentRun(){
  state.maxRuntimeMs=durationMinutes===0?0:durationMinutes*60*1000;
  state.deadlineAt=state.maxRuntimeMs?Date.now()+state.maxRuntimeMs:0;
  state.permissionMode=$("#agentPermissionMode")?.value==="trusted"&&!!activeProject?"trusted":"confirm";
+ state.permissionWorkspaceId=state.permissionMode==="trusted"?activeProject:"";
  if(state.pauseReason==="budget"){
   state.turnBudget=(Number(state.turnBudget)||AGENT_MAX_TURNS_PER_RUN)+AGENT_MAX_TURNS_PER_RUN;
   state.toolBudget=(Number(state.toolBudget)||AGENT_MAX_TOOL_CALLS_PER_RUN)+AGENT_MAX_TOOL_CALLS_PER_RUN;
