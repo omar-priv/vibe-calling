@@ -256,6 +256,11 @@
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const KEYS={providers:"vc_providers_v1",chats:"vc_chats_v1",notes:"vc_notes_v1",mcp:"vc_github_mcp_v1",remoteMcp:"vc_remote_mcp_v1",researchMode:"vc_research_mode_v1"};
 const AGENT_RESUME_KEY="vc_agent_resume_v1";
+const WORKER_JOBS_KEY="vc_background_agent_jobs_v1";
+const AUTOMATION_PREFS_KEY="vc_agent_automation_prefs_v1";
+const defaultAutomationPrefs={background:true,browser:false,computer:false,terminal:true};
+let automationPrefs={...defaultAutomationPrefs,...read(AUTOMATION_PREFS_KEY,{})};
+let activeWorkerWatchers=new Set();
 const AGENT_MAX_TURNS_PER_RUN=500;
 const AGENT_MAX_TOOL_CALLS_PER_RUN=2000;
 const AGENT_RESUME_MAX_CHARS=2500000;
@@ -645,6 +650,191 @@ function buildAgentTools(){
  const remote=Object.entries(githubMcpToolMap).map(([fn,tool])=>({type:"function",function:{name:fn,description:String(tool.description||tool.title||tool.name).slice(0,900),parameters:tool.inputSchema||{type:"object",properties:{}}}}));
  const remoteCustom=Object.entries(remoteMcpToolMap).map(([fn,tool])=>({type:"function",function:{name:fn,description:String(tool.description||tool.title||tool.name).slice(0,900),parameters:tool.inputSchema||{type:"object",properties:{}}}}));
  return tools.concat(remote,remoteCustom);
+}
+
+function buildBackgroundWorkerTools(){
+ const supported=new Set([
+  "calculator","get_current_datetime","skill_list","skill_read",
+  "workspace_list_projects","workspace_create_project","workspace_list_files",
+  "workspace_find_files","workspace_search_text","workspace_create_directory",
+  "workspace_move_file","workspace_read_file","workspace_write_file",
+  "workspace_delete_file","workspace_run_command","workspace_read_memory",
+  "workspace_update_memory"
+ ]);
+ const result=tools.filter(item=>supported.has(item.function?.name));
+ if(automationPrefs.terminal){
+  result.push(toolDef("workspace_terminal",
+   "Run one user-approved terminal command in the active workspace. No shell chaining. This is not a filesystem sandbox; each command requires explicit approval.",
+   {project:{type:"string"},command:{type:"string"}},["command"]));
+ }
+ if(automationPrefs.browser){
+  result.push(
+   toolDef("browser_open","Open a public website in the dedicated Vibe Calling browser. Local/private destinations are blocked.",{url:{type:"string"}},["url"]),
+   toolDef("browser_snapshot","Read the current browser page title, URL, and visible text.",{}),
+   toolDef("browser_click","Click exactly one element selected by a CSS locator. Requires approval.",{selector:{type:"string"}},["selector"]),
+   toolDef("browser_fill","Fill exactly one element selected by a CSS locator. Requires approval.",{selector:{type:"string"},text:{type:"string"}},["selector","text"]),
+   toolDef("browser_press","Press a key on exactly one selected element. Requires approval.",{selector:{type:"string"},key:{type:"string"}},["selector","key"]),
+   toolDef("browser_screenshot","Save a screenshot of the dedicated browser page.",{}),
+   toolDef("browser_close","Close the dedicated Vibe Calling browser session. Requires approval.",{})
+  );
+ }
+ if(automationPrefs.computer){
+  result.push(
+   toolDef("computer_list_windows","List visible Windows application windows and their process IDs.",{}),
+   toolDef("computer_inspect_window","Inspect a window's accessible UI Automation controls. Read-only.",{window_title:{type:"string"}},["window_title"]),
+   toolDef("computer_screenshot","Capture the selected Windows application window.",{window_title:{type:"string"}},["window_title"]),
+   toolDef("computer_click","Click one accessible Windows UI control. Requires approval.",{window_title:{type:"string"},automation_id:{type:"string"},control_title:{type:"string"},control_type:{type:"string"}},["window_title"]),
+   toolDef("computer_type","Enter text into one accessible Windows UI control. Requires approval.",{window_title:{type:"string"},automation_id:{type:"string"},control_title:{type:"string"},control_type:{type:"string"},text:{type:"string"}},["window_title","text"]),
+   toolDef("computer_press_keys","Send a safe key combination to one accessible Windows UI control. Requires approval.",{window_title:{type:"string"},automation_id:{type:"string"},control_title:{type:"string"},control_type:{type:"string"},keys:{type:"string"}},["window_title","keys"])
+  );
+ }
+ return result;
+}
+async function agentWorkerRequest(payload){
+ let response,raw;
+ try{
+  response=await fetch("/api/agent-worker",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+  raw=await response.text();
+ }catch(error){throw new Error("Could not reach the local background Agent service. Check that Vibe Calling is running. "+error.message)}
+ let data={};try{data=raw?JSON.parse(raw):{}}catch{}
+ if(!response.ok||data.ok===false)throw new Error(data.error||("Background Agent request failed (HTTP "+response.status+")."));
+ return data;
+}
+function getWorkerJobs(){const value=read(WORKER_JOBS_KEY,[]);return Array.isArray(value)?value:[]}
+function saveWorkerJobs(value){write(WORKER_JOBS_KEY,value.slice(0,12))}
+function updateWorkerJob(jobId,patch){
+ const jobs=getWorkerJobs(),index=jobs.findIndex(item=>item.jobId===jobId);
+ if(index<0)return null;
+ jobs[index]={...jobs[index],...patch};saveWorkerJobs(jobs);return jobs[index];
+}
+function renderWorkerStatus(label,detail=""){
+ const el=$("#agentWorkerStatus");
+ if(el)el.textContent=[label,detail].filter(Boolean).join(" · ");
+ const current=getWorkerJobs().find(item=>["queued","running","awaiting_approval"].includes(item.status));
+ const resume=$("#resumeBackgroundAgentBtn"),cancel=$("#cancelBackgroundAgentBtn");
+ if(resume)resume.hidden=!getWorkerJobs().some(item=>["paused","failed"].includes(item.status));
+ if(cancel)cancel.hidden=!current;
+}
+function pushWorkerResult(record,job){
+ const jobs=getWorkerJobs(),saved=jobs.find(item=>item.jobId===record.jobId);
+ if(saved?.finalAdded)return;
+ const target=chats.find(item=>item.id===record.chatId);
+ if(target){
+  const status=job.status;
+  const content=status==="completed"
+   ?(job.result_text||"The background Agent completed without a final text response.")
+   :"**Background Agent "+status+".**\\n\\n"+(job.last_error||"The task stopped. Review its saved checkpoints before resuming.");
+  target.messages.push({role:"assistant",content,model:record.model,toolLog:"Executed by the independent local Agent worker."});
+  if(target.title==="New conversation"&&record.prompt)target.title=record.prompt.slice(0,42);
+  saveChats();
+  if(chatId===target.id)renderChat();
+ }
+ updateWorkerJob(record.jobId,{finalAdded:true,status:job.status,updatedAt:job.updated_at});
+ if(job.status==="completed")toast("Background Agent completed.");
+ else toast("Background Agent "+job.status+".");
+}
+async function watchBackgroundAgent(record){
+ if(activeWorkerWatchers.has(record.jobId))return;
+ activeWorkerWatchers.add(record.jobId);
+ let current=record;
+ try{
+  while(true){
+   const data=await agentWorkerRequest({action:"status",job_id:current.jobId,after_id:current.lastEventId||0});
+   const job=data.job;
+   for(const item of data.events||[]){
+    current.lastEventId=Math.max(Number(current.lastEventId)||0,Number(item.id)||0);
+    if(item.kind==="approval_required"||item.kind==="waiting_approval"){}
+    if(item.kind==="tool_start")renderWorkerStatus("Background Agent running",item.message);
+    else if(item.kind==="model"||item.kind==="progress"||item.kind==="checkpoint"||item.kind==="recovery")renderWorkerStatus(job.status,item.message);
+    else if(item.kind==="tool_result")renderWorkerStatus("Background Agent running",item.message);
+    else if(item.kind==="tool_error")renderWorkerStatus("Tool needs attention",item.message);
+   }
+   current=updateWorkerJob(current.jobId,{lastEventId:current.lastEventId,status:job.status,updatedAt:job.updated_at})||current;
+   for(const approval of data.approvals||[]){
+    const description=JSON.stringify(approval.arguments||{},null,2).slice(0,1800);
+    const approved=window.confirm("The background Agent requests approval.\\n\\nTool: "+approval.tool+"\\nReason: "+(approval.reason||"Sensitive action")+
+      "\\n\\nArguments:\\n"+description+"\\n\\nApprove this action?");
+    await agentWorkerRequest({action:"approve",approval_id:approval.approval_id,approved});
+   }
+   if(["completed","failed","paused","cancelled"].includes(job.status)){
+    if(!current.finalAdded)pushWorkerResult(current,job);
+    renderWorkerStatus("Worker "+job.status,job.last_error||job.result_text?.slice(0,180)||"Task finished.");
+    return;
+   }
+   renderWorkerStatus(job.status==="awaiting_approval"?"Waiting for your approval":"Background Agent "+job.status,
+     job.current_tool?.name||"Task continues even when this browser tab is closed.");
+   await new Promise(resolve=>setTimeout(resolve,1400));
+  }
+ }catch(error){
+  renderWorkerStatus("Background task remains saved",error.message);
+ }finally{
+  activeWorkerWatchers.delete(record.jobId);
+ }
+}
+async function startBackgroundAgent(state,provider,spinner){
+ const job={
+  provider:{baseUrl:provider.baseUrl,apiKey:provider.apiKey,model:state.model,
+   customHeader:provider.customHeader||"",customHeaderValue:provider.customHeaderValue||""},
+  history:state.history,tools:buildBackgroundWorkerTools(),activeProject:activeProject||"",
+  permissionMode:state.permissionMode,permissionWorkspaceId:state.permissionWorkspaceId,
+  maxRuntimeMs:state.maxRuntimeMs,deadlineAt:state.deadlineAt,prompt:state.prompt
+ };
+ const data=await agentWorkerRequest({action:"enqueue",job});
+ const record={jobId:data.job_id,chatId:state.chatId,model:state.model,prompt:state.prompt,
+  lastEventId:0,status:"queued",createdAt:Date.now(),finalAdded:false};
+ const jobs=getWorkerJobs();jobs.unshift(record);saveWorkerJobs(jobs);
+ spinner?.remove();setAgentProgress("Running in a separate background process · you can close this tab.");
+ renderWorkerStatus("Background Agent queued","This task runs independently of the browser tab.");
+ toast("Background Agent started.");
+ watchBackgroundAgent(record);
+}
+async function restoreBackgroundAgentJobs(){
+ const jobs=getWorkerJobs();
+ for(const record of jobs.slice(0,8)){
+  try{
+   const data=await agentWorkerRequest({action:"status",job_id:record.jobId,after_id:record.lastEventId||0});
+   updateWorkerJob(record.jobId,{status:data.job.status,updatedAt:data.job.updated_at});
+   if(["queued","running","awaiting_approval"].includes(data.job.status))watchBackgroundAgent(record);
+   else if(!record.finalAdded)pushWorkerResult(record,data.job);
+  }catch(error){
+   if(record.status==="queued"||record.status==="running"||record.status==="awaiting_approval")
+    renderWorkerStatus("Background service unavailable",error.message);
+  }
+ }
+}
+async function refreshAgentWorkerStatus(){
+ try{
+  const data=await agentWorkerRequest({action:"capabilities"});
+  const worker=data.worker||{};
+  const automation=data.automation||{};
+  const browser=$("#enableBrowserAutomation"),computer=$("#enableComputerUse"),terminal=$("#enableGuardedTerminal"),background=$("#enableBackgroundWorker");
+  if(browser)browser.checked=!!automationPrefs.browser;
+  if(computer)computer.checked=!!automationPrefs.computer;
+  if(terminal)terminal.checked=!!automationPrefs.terminal;
+  if(background)background.checked=automationPrefs.background!==false;
+  const browserStatus=$("#browserDependencyStatus"),computerStatus=$("#computerDependencyStatus");
+  if(browserStatus)browserStatus.textContent=automation.browser?"Installed · Chromium may still need setup":"Not installed · optional Playwright";
+  if(computerStatus)computerStatus.textContent=automation.computer?"Installed · Windows UI Automation":"Not installed · optional pywinauto";
+  renderWorkerStatus(worker.running?"Worker online":"Worker idle",worker.running?"Independent process · PID "+worker.pid:"The worker starts automatically when an Agent task is queued.");
+  restoreBackgroundAgentJobs();
+ }catch(error){renderWorkerStatus("Worker status unavailable",error.message)}
+}
+async function resumeBackgroundAgent(){
+ const item=getWorkerJobs().find(job=>["paused","failed"].includes(job.status));
+ if(!item)return;
+ try{
+  await agentWorkerRequest({action:"resume",job_id:item.jobId});
+  updateWorkerJob(item.jobId,{status:"queued",finalAdded:false,lastEventId:item.lastEventId||0});
+  const updated=getWorkerJobs().find(job=>job.jobId===item.jobId);
+  watchBackgroundAgent(updated);
+  renderWorkerStatus("Background Agent resumed","Saved checkpoint restored.");
+ }catch(error){toast("Could not resume task: "+error.message)}
+}
+async function cancelBackgroundAgent(){
+ const item=getWorkerJobs().find(job=>["queued","running","awaiting_approval"].includes(job.status));
+ if(!item)return;
+ try{await agentWorkerRequest({action:"cancel",job_id:item.jobId});toast("Stop request sent to the background Agent.");}
+ catch(error){toast("Could not stop task: "+error.message)}
 }
 async function callGithubMcpTool(functionName,args){
  const tool=githubMcpToolMap[functionName];if(!tool)throw new Error("GitHub MCP tool is unavailable. Reconnect GitHub MCP.");
@@ -1306,7 +1496,15 @@ async function send(text,attachments=[]){
    const maxRuntimeMs=durationMinutes===0?0:durationMinutes*60*1000;
    const permissionMode=$("#agentPermissionMode")?.value==="trusted"&&!!activeProject?"trusted":"confirm";
    state={chatId,providerId:q.provider.id,model:q.model,history,used:[],step:0,turns:0,turnBudget:AGENT_MAX_TURNS_PER_RUN,toolCalls:0,toolBudget:AGENT_MAX_TOOL_CALLS_PER_RUN,pendingToolCalls:[],pendingToolIndex:0,pendingToolStatus:"",repeatStreak:0,recentToolOutcomes:[],emptyResponses:0,pauseReason:"",researchMode:researchEnabled?researchMode:"off",prompt:text,permissionMode,permissionWorkspaceId:permissionMode==="trusted"?activeProject:"",maxRuntimeMs,startedAt:Date.now(),deadlineAt:maxRuntimeMs?Date.now()+maxRuntimeMs:0};
-   saveAgentResume(state);await runAgentLoop(state,spinner);
+   if(!researchEnabled&&automationPrefs.background!==false){
+    try{await startBackgroundAgent(state,q.provider,spinner)}
+    catch(workerError){
+     spinner?.remove();
+     addMessage("assistant","**Background worker could not start.**\n\n"+workerError.message+"\n\nThe saved task was not run in the browser. Check the local worker status and try again.",{model:q.model});
+    }
+   }else{
+    saveAgentResume(state);await runAgentLoop(state,spinner);
+   }
   }else{
    setAgentProgress("Waiting for provider response…");
    const response=await api(q.provider,"/chat/completions","POST",{model:q.model,messages:history,temperature:.7,stream:false},controller.signal);
@@ -1452,7 +1650,22 @@ $("#agentPermissionMode").addEventListener("change",e=>{
 $("#researchMode").addEventListener("change",e=>{researchMode=["off","web","deep"].includes(e.target.value)?e.target.value:"off";write(KEYS.researchMode,researchMode);syncToolState();toast(researchMode==="deep"?"Deep Research selected":researchMode==="web"?"Web Research selected":"Research mode off")});
 $("#projectSelect").addEventListener("change",e=>{setActiveProject(e.target.value);refreshWorkspacePanel()});
 $("#skillFileInput").addEventListener("change",async e=>{for(const file of [...e.target.files])await installSkillFile(file);e.target.value=""});
-function init(){try{filterSavedFreeModels();$("#researchMode").value=researchMode;syncToolState();renderProviders();renderModels();renderNvidiaCatalog();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();renderRemoteMcpStatus();console.info("Vibe Calling initialized");if(mcpConfig.connected&&mcpConfig.token)connectGitHubMcp();if(remoteMcpConfig.connected&&remoteMcpConfig.url)connectRemoteMcp()}catch(e){fatal(e.stack||e.message||String(e))}}
+function saveAutomationPref(key,value){
+ automationPrefs={...automationPrefs,[key]:!!value};write(AUTOMATION_PREFS_KEY,automationPrefs);
+ if(key==="browser"||key==="computer")toast("Automation setting saved. Optional dependencies may be required.");
+}
+$("#enableBackgroundWorker")?.addEventListener("change",e=>saveAutomationPref("background",e.target.checked));
+$("#enableBrowserAutomation")?.addEventListener("change",e=>saveAutomationPref("browser",e.target.checked));
+$("#enableComputerUse")?.addEventListener("change",e=>saveAutomationPref("computer",e.target.checked));
+$("#enableGuardedTerminal")?.addEventListener("change",e=>saveAutomationPref("terminal",e.target.checked));
+$("#refreshAgentWorkerStatusBtn")?.addEventListener("click",refreshAgentWorkerStatus);
+$("#resumeBackgroundAgentBtn")?.addEventListener("click",resumeBackgroundAgent);
+$("#cancelBackgroundAgentBtn")?.addEventListener("click",()=>{if(confirm("Stop the currently queued or running background Agent task? Completed file changes will remain saved."))cancelBackgroundAgent()});
+$("#installAutomationGuideBtn")?.addEventListener("click",()=>window.alert(
+ "Optional automation install (Windows):\\n\\n1. Extract the latest Vibe Calling ZIP.\\n2. Open the project folder in File Explorer.\\n3. Double-click install-automation.bat.\\n4. It installs Playwright + pywinauto and downloads Chromium.\\n5. Restart Vibe Calling, then enable Browser Automation and/or Computer Use.\\n\\nThe browser package and Chromium download are optional and may use several hundred MB. Computer Use requires an unlocked Windows desktop session."
+));
+
+function init(){try{filterSavedFreeModels();$("#researchMode").value=researchMode;syncToolState();renderProviders();renderModels();renderNvidiaCatalog();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();renderRemoteMcpStatus();refreshAgentWorkerStatus();console.info("Vibe Calling initialized");if(mcpConfig.connected&&mcpConfig.token)connectGitHubMcp();if(remoteMcpConfig.connected&&remoteMcpConfig.url)connectRemoteMcp()}catch(e){fatal(e.stack||e.message||String(e))}}
 init();
 window.__vibeAppReady = true;
 document.documentElement.dataset.vibeApp = 'ready';
