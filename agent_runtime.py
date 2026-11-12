@@ -348,6 +348,8 @@ def worker_status() -> dict[str, Any]:
 def ensure_worker() -> dict[str, Any]:
     """Atomically reserve a single worker slot before launching a detached process."""
     initialize()
+    if os.name != "nt":
+        raise RuntimeError("The durable DPAPI-protected background worker is currently supported on Windows only.")
     sentinel = -int(uuid.uuid4().int % 2_000_000_000) - 1
     now = time.time()
     with connect() as db:
@@ -402,6 +404,8 @@ def request_cancel(job_id: str) -> dict[str, Any]:
         new_status = "cancelled" if row["status"] == "queued" else row["status"]
         db.execute("UPDATE jobs SET cancel_requested=1,status=?,updated_at=? WHERE id=?",
                    (new_status, time.time(), job_id))
+        db.execute("UPDATE approvals SET status='expired' WHERE job_id=? AND status='pending'",
+                   (job_id,))
     add_event(job_id, "cancel_requested", "Stop requested. The worker will stop at the next safe checkpoint.")
     return {"ok": True}
 
