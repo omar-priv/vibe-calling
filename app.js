@@ -562,6 +562,11 @@ async function refreshAgentWorkerStatus(){
   const data=await agentWorkerRequest({action:"capabilities"});
   const worker=data.worker||{};
   const automation=data.automation||{};
+  if(data.supported===false){
+   renderWorkerStatus("Unsupported platform","DPAPI-protected background jobs currently require Windows.");
+   ["#enableBackgroundWorker","#enableBrowserAutomation","#enableComputerUse","#enableGuardedTerminal","#refreshAgentWorkerStatusBtn","#resumeBackgroundAgentBtn","#cancelBackgroundAgentBtn"].forEach(selector=>{const el=$(selector);if(el)el.disabled=true;});
+   return;
+  }
   const browser=$("#enableBrowserAutomation"),computer=$("#enableComputerUse"),terminal=$("#enableGuardedTerminal"),background=$("#enableBackgroundWorker");
   if(browser)browser.checked=!!automationPrefs.browser;
   if(computer)computer.checked=!!automationPrefs.computer;

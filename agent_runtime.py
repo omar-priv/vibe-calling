@@ -42,9 +42,9 @@ def connect() -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(str(path), timeout=15)
     db.row_factory = sqlite3.Row
+    db.execute("PRAGMA busy_timeout=15000")
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA foreign_keys=ON")
-    db.execute("PRAGMA busy_timeout=15000")
     return db
 
 
@@ -166,7 +166,8 @@ def submit_job(payload: dict[str, Any]) -> dict[str, Any]:
     tools = payload.get("tools")
     if not isinstance(provider, dict) or not isinstance(history, list) or not isinstance(tools, list):
         raise ValueError("Provider, conversation history, and tool schemas are required.")
-    if len(json.dumps(payload, ensure_ascii=False)) > MAX_JOB_BYTES:
+    payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    if len(payload_json.encode("utf-8")) > MAX_JOB_BYTES:
         raise ValueError("Agent job context exceeds the 7 MB local limit.")
     api_key = provider.pop("apiKey", None)
     secret = protect_secret(api_key)
@@ -252,7 +253,7 @@ def get_events(job_id: str, after_id: int = 0, limit: int = 150) -> list[dict[st
 
 def set_checkpoint(job_id: str, checkpoint: dict[str, Any]) -> None:
     encoded = json.dumps(checkpoint, ensure_ascii=False, separators=(",", ":"))
-    if len(encoded) > MAX_JOB_BYTES:
+    if len(encoded.encode("utf-8")) > MAX_JOB_BYTES:
         raise ValueError("Agent checkpoint exceeds the 7 MB local limit.")
     protected = _dpapi(encoded.encode("utf-8"))
     with connect() as db:
