@@ -105,21 +105,34 @@ def _dpapi(raw: bytes, decrypt: bool = False) -> bytes:
     source = ctypes.create_string_buffer(raw)
     blob = _DataBlob(len(raw), ctypes.cast(source, ctypes.POINTER(ctypes.c_ubyte)))
     output = _DataBlob()
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
+    from ctypes import wintypes
+    crypt32 = ctypes.WinDLL("Crypt32.dll", use_last_error=True)
+    kernel32 = ctypes.WinDLL("Kernel32.dll", use_last_error=True)
+    crypt32.CryptProtectData.argtypes = [ctypes.POINTER(_DataBlob), wintypes.LPCWSTR,
+                                         ctypes.POINTER(_DataBlob), ctypes.c_void_p,
+                                         ctypes.c_void_p, wintypes.DWORD,
+                                         ctypes.POINTER(_DataBlob)]
+    crypt32.CryptProtectData.restype = wintypes.BOOL
+    crypt32.CryptUnprotectData.argtypes = [ctypes.POINTER(_DataBlob), ctypes.POINTER(ctypes.c_wchar_p),
+                                           ctypes.POINTER(_DataBlob), ctypes.c_void_p,
+                                           ctypes.c_void_p, wintypes.DWORD,
+                                           ctypes.POINTER(_DataBlob)]
+    crypt32.CryptUnprotectData.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
     flags = 0x1  # CRYPTPROTECT_UI_FORBIDDEN
     if decrypt:
         ok = crypt32.CryptUnprotectData(ctypes.byref(blob), None, None, None, None,
                                         flags, ctypes.byref(output))
     else:
-        ok = crypt32.CryptProtectData(ctypes.byref(blob), "Vibe Calling Agent key",
+        ok = crypt32.CryptProtectData(ctypes.byref(blob), "Vibe Calling Agent data",
                                       None, None, None, flags, ctypes.byref(output))
     if not ok:
-        raise ctypes.WinError()
+        raise ctypes.WinError(ctypes.get_last_error())
     try:
         return ctypes.string_at(output.pbData, output.cbData)
     finally:
-        kernel32.LocalFree(output.pbData)
+        kernel32.LocalFree(ctypes.cast(output.pbData, ctypes.c_void_p))
 
 
 def protect_secret(value: str) -> bytes:
@@ -163,15 +176,15 @@ def submit_job(payload: dict[str, Any]) -> dict[str, Any]:
     now = time.time()
     stored = dict(payload)
     stored["provider"] = dict(provider)
+    payload_blob = _dpapi(json.dumps(stored, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    checkpoint_blob = _dpapi(json.dumps({"history": history, "turns": 0, "tool_calls": 0},
+                                        ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     with connect() as db:
         db.execute(
             """INSERT INTO jobs(id,status,created_at,updated_at,payload_json,secret_blob,checkpoint_json)
                VALUES(?,?,?,?,?,?,?)""",
-            (job_id, "queued", now, now,
-             json.dumps(stored, ensure_ascii=False, separators=(",", ":")),
-             sqlite3.Binary(secret),
-             json.dumps({"history": history, "turns": 0, "tool_calls": 0},
-                        ensure_ascii=False, separators=(",", ":"))),
+            (job_id, "queued", now, now, sqlite3.Binary(payload_blob),
+             sqlite3.Binary(secret), sqlite3.Binary(checkpoint_blob)),
         )
     add_event(job_id, "queued", "Task accepted by the local background worker.")
     return {"job_id": job_id, "status": "queued"}
@@ -190,11 +203,16 @@ def get_job(job_id: str) -> dict[str, Any] | None:
     if value.get("current_tool_json"):
         try:
             value["current_tool"] = json.loads(value.pop("current_tool_json"))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, TypeError):
             value["current_tool"] = {"state": "unknown"}
             value.pop("current_tool_json", None)
     else:
         value.pop("current_tool_json", None)
+    if value.get("result_text"):
+        try:
+            value["result_text"] = _dpapi(bytes(value["result_text"]), decrypt=True).decode("utf-8")
+        except Exception:
+            value["result_text"] = "[The saved result could not be decrypted for this Windows user.]"
     return value
 
 
@@ -234,9 +252,10 @@ def set_checkpoint(job_id: str, checkpoint: dict[str, Any]) -> None:
     encoded = json.dumps(checkpoint, ensure_ascii=False, separators=(",", ":"))
     if len(encoded) > MAX_JOB_BYTES:
         raise ValueError("Agent checkpoint exceeds the 2.5 MB limit.")
+    protected = _dpapi(encoded.encode("utf-8"))
     with connect() as db:
         db.execute("UPDATE jobs SET checkpoint_json=?,updated_at=? WHERE id=?",
-                   (encoded, time.time(), job_id))
+                   (sqlite3.Binary(protected), time.time(), job_id))
 
 
 def load_job_for_worker(job_id: str) -> dict[str, Any] | None:
@@ -245,8 +264,9 @@ def load_job_for_worker(job_id: str) -> dict[str, Any] | None:
     if not row:
         return None
     value = dict(row)
-    value["payload"] = json.loads(value.pop("payload_json"))
-    value["checkpoint"] = json.loads(value.pop("checkpoint_json") or "{}")
+    value["payload"] = json.loads(_dpapi(bytes(value.pop("payload_json")), decrypt=True).decode("utf-8"))
+    checkpoint_blob = value.pop("checkpoint_json")
+    value["checkpoint"] = json.loads(_dpapi(bytes(checkpoint_blob), decrypt=True).decode("utf-8")) if checkpoint_blob else {}
     value["api_key"] = unprotect_secret(value.pop("secret_blob"))
     return value
 
@@ -342,10 +362,12 @@ def resume_job(job_id: str) -> dict[str, Any]:
             raise ValueError("Agent job was not found.")
         if row["status"] not in {"paused", "failed"}:
             raise ValueError("Only a paused or failed task can be resumed.")
-        checkpoint = json.loads(row["checkpoint_json"] or "{}")
+        checkpoint_blob = row["checkpoint_json"]
+        checkpoint = json.loads(_dpapi(bytes(checkpoint_blob), decrypt=True).decode("utf-8")) if checkpoint_blob else {}
         checkpoint["resume_window"] = True
+        protected = _dpapi(json.dumps(checkpoint, ensure_ascii=False).encode("utf-8"))
         db.execute("UPDATE jobs SET status='queued',cancel_requested=0,last_error=NULL,checkpoint_json=?,updated_at=? WHERE id=?",
-                   (json.dumps(checkpoint, ensure_ascii=False), time.time(), job_id))
+                   (sqlite3.Binary(protected), time.time(), job_id))
     add_event(job_id, "resumed", "Task added back to the worker queue.")
     ensure_worker()
     return {"ok": True, "status": "queued"}
@@ -365,13 +387,19 @@ def approve_action(approval_id: str, approved: bool) -> dict[str, Any]:
 
 def create_approval(job_id: str, details: dict[str, Any]) -> str:
     approval_id = uuid.uuid4().hex
+    safe_details = json.loads(json.dumps(details, ensure_ascii=False))
+    arguments = safe_details.get("arguments", {}) if isinstance(safe_details, dict) else {}
+    if isinstance(arguments, dict):
+        for key in ("text", "password", "token", "api_key", "apiKey", "authorization", "secret", "content"):
+            if key in arguments:
+                arguments[key] = "[redacted before saving]"
     with connect() as db:
         db.execute("INSERT INTO approvals(id,job_id,created_at,status,details_json) VALUES(?,?,?,?,?)",
                    (approval_id, job_id, time.time(), "pending",
-                    json.dumps(details, ensure_ascii=False, separators=(",", ":"))))
+                    json.dumps(safe_details, ensure_ascii=False, separators=(",", ":"))))
         db.execute("UPDATE jobs SET status='awaiting_approval',updated_at=? WHERE id=?",
                    (time.time(), job_id))
-    add_event(job_id, "approval_required", "Agent is waiting for approval.", {"approval_id": approval_id, **details})
+    add_event(job_id, "approval_required", "Agent is waiting for approval.", {"approval_id": approval_id, **safe_details})
     return approval_id
 
 
@@ -447,7 +475,8 @@ def cancel_requested(job_id: str) -> bool:
 def complete_job(job_id: str, status: str, result: str = "", error: str = "") -> None:
     if status not in {"completed", "failed", "paused", "cancelled"}:
         raise ValueError("Invalid final job status.")
+    protected_result = sqlite3.Binary(_dpapi(result[:50000].encode("utf-8"))) if result else None
     with connect() as db:
         db.execute("UPDATE jobs SET status=?,result_text=?,last_error=?,current_tool_json=NULL,updated_at=? WHERE id=?",
-                   (status, result[:50000], error[:4000], time.time(), job_id))
+                   (status, protected_result, error[:4000], time.time(), job_id))
     add_event(job_id, status, result[:3000] if status == "completed" else (error or status)[:3000])
