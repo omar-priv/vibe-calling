@@ -208,11 +208,13 @@ def get_job(job_id: str) -> dict[str, Any] | None:
             value.pop("current_tool_json", None)
     else:
         value.pop("current_tool_json", None)
-    if value.get("result_text"):
-        try:
-            value["result_text"] = _dpapi(bytes(value["result_text"]), decrypt=True).decode("utf-8")
-        except Exception:
-            value["result_text"] = "[The saved result could not be decrypted for this Windows user.]"
+    for field, fallback in (("result_text", "[Saved result could not be decrypted for this Windows user.]"),
+                            ("last_error", "[Saved error details could not be decrypted for this Windows user.]")):
+        if value.get(field):
+            try:
+                value[field] = _dpapi(bytes(value[field]), decrypt=True).decode("utf-8")
+            except Exception:
+                value[field] = fallback
     return value
 
 
@@ -251,7 +253,7 @@ def get_events(job_id: str, after_id: int = 0, limit: int = 150) -> list[dict[st
 def set_checkpoint(job_id: str, checkpoint: dict[str, Any]) -> None:
     encoded = json.dumps(checkpoint, ensure_ascii=False, separators=(",", ":"))
     if len(encoded) > MAX_JOB_BYTES:
-        raise ValueError("Agent checkpoint exceeds the 2.5 MB limit.")
+        raise ValueError("Agent checkpoint exceeds the 7 MB local limit.")
     protected = _dpapi(encoded.encode("utf-8"))
     with connect() as db:
         db.execute("UPDATE jobs SET checkpoint_json=?,updated_at=? WHERE id=?",
@@ -284,20 +286,43 @@ def worker_stopped(pid: int) -> None:
                    (pid,))
 
 
+def release_worker_if_idle(pid: int) -> bool:
+    """Atomically release the singleton slot only if no uncancelled queued job exists."""
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        pending = db.execute(
+            "SELECT 1 FROM jobs WHERE status='queued' AND cancel_requested=0 LIMIT 1"
+        ).fetchone()
+        if pending:
+            db.commit()
+            return False
+        db.execute("UPDATE worker_state SET pid=NULL,heartbeat=0,started_at=NULL WHERE singleton=1 AND pid=?",
+                   (pid,))
+        db.commit()
+        return True
+
+
 def _pid_is_alive(pid: int) -> bool:
     if not pid or pid <= 0:
         return False
     try:
         if os.name == "nt":
-            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            from ctypes import wintypes
+            kernel = ctypes.WinDLL("Kernel32.dll", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            kernel.GetExitCodeProcess.restype = wintypes.BOOL
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel.CloseHandle.restype = wintypes.BOOL
+            handle = kernel.OpenProcess(0x1000, False, int(pid))
             if not handle:
                 return False
             try:
-                code = ctypes.c_ulong()
-                return bool(ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
+                code = wintypes.DWORD()
+                return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
             finally:
-                ctypes.windll.kernel32.CloseHandle(handle)
+                kernel.CloseHandle(handle)
         os.kill(int(pid), 0)
         return True
     except (OSError, ValueError):
@@ -311,19 +336,38 @@ def worker_status() -> dict[str, Any]:
         counts = {r["status"]: r["count"] for r in db.execute(
             "SELECT status,COUNT(*) AS count FROM jobs GROUP BY status"
         ).fetchall()}
-    alive = bool(row and row["pid"] and _pid_is_alive(int(row["pid"])))
-    return {"running": alive, "pid": row["pid"] if alive else None,
-            "heartbeat_age": round(time.time() - float(row["heartbeat"] or 0), 1) if alive else None,
+    pid = int(row["pid"] or 0) if row else 0
+    age = time.time() - float(row["heartbeat"] or 0) if row else None
+    starting = pid < 0 and age is not None and age < 30
+    alive = starting or (pid > 0 and _pid_is_alive(pid))
+    return {"running": alive, "starting": starting, "pid": pid if pid > 0 and alive else None,
+            "heartbeat_age": round(age, 1) if alive and age is not None else None,
             "jobs": counts}
 
 
 def ensure_worker() -> dict[str, Any]:
+    """Atomically reserve a single worker slot before launching a detached process."""
     initialize()
-    status = worker_status()
-    if status["running"]:
-        return status
+    sentinel = -int(uuid.uuid4().int % 2_000_000_000) - 1
+    now = time.time()
+    with connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT pid,heartbeat FROM worker_state WHERE singleton=1").fetchone()
+        current_pid = int(row["pid"] or 0) if row else 0
+        age = now - float(row["heartbeat"] or 0) if row else 999999
+        if current_pid > 0 and _pid_is_alive(current_pid):
+            db.commit()
+            return {"running": True, "starting": False, "pid": current_pid}
+        if current_pid < 0 and age < 30:
+            db.commit()
+            return {"running": True, "starting": True, "pid": None}
+        db.execute("UPDATE worker_state SET pid=?,heartbeat=?,started_at=? WHERE singleton=1",
+                   (sentinel, now, now))
+        db.commit()
+
     worker_script = Path(__file__).resolve().with_name("agent_worker.py")
     if not worker_script.is_file():
+        worker_stopped(sentinel)
         raise RuntimeError("The background worker file is missing.")
     flags = 0
     if os.name == "nt":
@@ -339,18 +383,25 @@ def ensure_worker() -> dict[str, Any]:
         kwargs["creationflags"] = flags
     else:
         kwargs["start_new_session"] = True
-    subprocess.Popen([sys.executable, str(worker_script)], **kwargs)
-    return {"running": True, "starting": True, "pid": None}
+    try:
+        process = subprocess.Popen([sys.executable, str(worker_script)], **kwargs)
+    except Exception:
+        worker_stopped(sentinel)
+        raise
+    with connect() as db:
+        db.execute("UPDATE worker_state SET pid=?,heartbeat=?,started_at=COALESCE(started_at,?) WHERE singleton=1 AND pid=?",
+                   (process.pid, time.time(), time.time(), sentinel))
+    return {"running": True, "starting": True, "pid": process.pid}
 
 
 def request_cancel(job_id: str) -> dict[str, Any]:
     with connect() as db:
-        cursor = db.execute(
-            "UPDATE jobs SET cancel_requested=1,updated_at=? WHERE id=? AND status IN ('queued','running','awaiting_approval','paused')",
-            (time.time(), job_id),
-        )
-        if not cursor.rowcount:
+        row = db.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if not row or row["status"] not in {"queued", "running", "awaiting_approval", "paused"}:
             raise ValueError("This Agent job is not active or no longer exists.")
+        new_status = "cancelled" if row["status"] == "queued" else row["status"]
+        db.execute("UPDATE jobs SET cancel_requested=1,status=?,updated_at=? WHERE id=?",
+                   (new_status, time.time(), job_id))
     add_event(job_id, "cancel_requested", "Stop requested. The worker will stop at the next safe checkpoint.")
     return {"ok": True}
 
@@ -460,7 +511,9 @@ def mark_running_jobs_interrupted() -> None:
         for row in rows:
             note = "Worker restarted while a tool call was in progress. Its outcome may be unknown; inspect the workspace before retrying."
             db.execute("UPDATE jobs SET status='paused',last_error=?,updated_at=? WHERE id=?",
-                       (note, time.time(), row["id"]))
+                       (sqlite3.Binary(_dpapi(note.encode("utf-8"))), time.time(), row["id"]))
+            db.execute("UPDATE approvals SET status='expired' WHERE job_id=? AND status='pending'",
+                       (row["id"],))
     for row in rows:
         add_event(row["id"], "interrupted",
                   "Worker restarted while a tool call was in progress. Its outcome may be unknown; inspect the workspace before retrying.")
@@ -476,7 +529,8 @@ def complete_job(job_id: str, status: str, result: str = "", error: str = "") ->
     if status not in {"completed", "failed", "paused", "cancelled"}:
         raise ValueError("Invalid final job status.")
     protected_result = sqlite3.Binary(_dpapi(result[:50000].encode("utf-8"))) if result else None
+    protected_error = sqlite3.Binary(_dpapi(error[:4000].encode("utf-8"))) if error else None
     with connect() as db:
         db.execute("UPDATE jobs SET status=?,result_text=?,last_error=?,current_tool_json=NULL,updated_at=? WHERE id=?",
-                   (status, protected_result, error[:4000], time.time(), job_id))
-    add_event(job_id, status, result[:3000] if status == "completed" else (error or status)[:3000])
+                   (status, protected_result, protected_error, time.time(), job_id))
+    add_event(job_id, status, "Background task finished with status: " + status + ".")
