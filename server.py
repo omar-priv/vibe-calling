@@ -1112,10 +1112,6 @@ def run_project_command(project_id, command, timeout_seconds=None):
         )
     if any(not SAFE_COMMAND_TOKEN_RE.fullmatch(arg) or ".." in arg or arg.startswith("/") for arg in args):
         raise ValueError("Command contains an unsupported or out-of-project argument.")
-    resolved = shutil.which(parts[0])
-    if not resolved:
-        raise ValueError(f"'{parts[0]}' is not installed or not on PATH.")
-    final_args = [resolved] + args
     default_timeout = 600 if (args in (["install"], ["ci"]) or args == ["-m", "pip", "install", "-r", "requirements.txt"]) else 300
     if timeout_seconds is None:
         command_timeout = default_timeout
@@ -1123,6 +1119,10 @@ def run_project_command(project_id, command, timeout_seconds=None):
         if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 600:
             raise ValueError("Command timeout must be a whole number between 1 and 600 seconds.")
         command_timeout = min(default_timeout, timeout_seconds)
+    resolved = shutil.which(parts[0])
+    if not resolved:
+        raise ValueError(f"'{parts[0]}' is not installed or not on PATH.")
+    final_args = [resolved] + args
     try:
         if os.name == "nt" and resolved.lower().endswith((".cmd", ".bat")):
             command_line = subprocess.list2cmdline(final_args)
