@@ -55,6 +55,21 @@ def _validate_public_url(url: str) -> str:
     return parts.geturl()
 
 
+def cleanup_browser_session(job_id: str | None = None) -> None:
+    global _BROWSER_CONTEXT, _BROWSER_PAGE, _BROWSER_JOB
+    if job_id is not None and _BROWSER_JOB not in (None, job_id):
+        return
+    if _BROWSER_CONTEXT:
+        manager, context = _BROWSER_CONTEXT
+        try:
+            context.close()
+        finally:
+            manager.stop()
+    _BROWSER_CONTEXT = None
+    _BROWSER_PAGE = None
+    _BROWSER_JOB = None
+
+
 def _browser_page():
     global _BROWSER_CONTEXT, _BROWSER_PAGE
     if _BROWSER_PAGE is not None:
@@ -76,6 +91,7 @@ def _browser_page():
             user_data_dir=str(profile), headless=False,
             args=["--disable-background-networking", "--disable-sync"],
             viewport={"width": 1365, "height": 850},
+            service_workers="block",
         )
     except Exception:
         manager.stop()
@@ -89,7 +105,7 @@ def _browser_page():
         except Exception:
             route.abort("blockedbyclient")
 
-    page.route("**/*", guard)
+    context.route("**/*", guard)
     _BROWSER_CONTEXT = (manager, context)
     _BROWSER_PAGE = page
     return page
@@ -99,18 +115,26 @@ def browser_tool(name: str, args: dict, job_id: str) -> str:
     global _BROWSER_CONTEXT, _BROWSER_PAGE, _BROWSER_JOB
     if name == "browser_open":
         url = _validate_public_url(str(args.get("url", "")))
+        if _BROWSER_JOB and _BROWSER_JOB != job_id:
+            cleanup_browser_session()
         page = _browser_page()
         _BROWSER_JOB = job_id
         page.goto(url, wait_until="domcontentloaded", timeout=30000)
         return "Opened " + page.url + "\nTitle: " + page.title()
     if name == "browser_snapshot":
+        if _BROWSER_JOB and _BROWSER_JOB != job_id:
+            cleanup_browser_session()
         page = _browser_page()
+        _BROWSER_JOB = job_id
         title = page.title()
         current = page.url
         text = page.locator("body").inner_text(timeout=10000)
         return ("URL: " + current + "\nTITLE: " + title + "\nPAGE TEXT:\n" + text[:24000])
     if name in {"browser_click", "browser_fill", "browser_press"}:
+        if _BROWSER_JOB and _BROWSER_JOB != job_id:
+            cleanup_browser_session()
         page = _browser_page()
+        _BROWSER_JOB = job_id
         selector = str(args.get("selector", "")).strip()
         if not selector or len(selector) > 500:
             raise ValueError("Provide a CSS selector or accessible locator.")
@@ -133,22 +157,17 @@ def browser_tool(name: str, args: dict, job_id: str) -> str:
         locator.press(key, timeout=10000)
         return "Pressed " + key + " on " + selector + "."
     if name == "browser_screenshot":
+        if _BROWSER_JOB and _BROWSER_JOB != job_id:
+            cleanup_browser_session()
         page = _browser_page()
+        _BROWSER_JOB = job_id
         folder = data_dir() / "screenshots" / job_id
         folder.mkdir(parents=True, exist_ok=True)
         target = folder / ("browser-" + str(int(time.time())) + ".png")
         page.screenshot(path=str(target), full_page=False)
         return "Screenshot saved to " + str(target)
     if name == "browser_close":
-        if _BROWSER_CONTEXT:
-            manager, context = _BROWSER_CONTEXT
-            try:
-                context.close()
-            finally:
-                manager.stop()
-        _BROWSER_CONTEXT = None
-        _BROWSER_PAGE = None
-        _BROWSER_JOB = None
+        cleanup_browser_session(job_id)
         return "The dedicated Vibe Calling browser session was closed."
     raise ValueError("Unknown browser automation tool.")
 
