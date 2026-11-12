@@ -611,6 +611,7 @@ async function runTool(name,a){
  if(name==="workspace_move_file"){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or open a workspace first.");
   if(!(activeAgentPermissionMode==="trusted"&&project===activeAgentPermissionWorkspaceId)&&!confirm("The agent wants to move or rename this file:\n\n"+a.source+" → "+a.destination+"\n\nAllow this change?"))return "User declined the file move.";
+  if(agentDeadlineReached(pendingAgentRun))return "The run window expired before the file move started. Resume the task to continue.";
   const data=await workspaceRequest({action:"move_file",project,source:a.source,destination:a.destination});
   if(project===activeProject)await refreshWorkspacePanel();
   return "Moved "+data.source+" to "+data.destination+".";
@@ -641,6 +642,7 @@ async function runTool(name,a){
  if(name==="workspace_delete_file"){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
   if(!(activeAgentPermissionMode==="trusted"&&project===activeAgentPermissionWorkspaceId)&&!confirm("The agent wants to permanently delete this file:\n\n"+project+"/"+a.path+"\n\nAllow this deletion?"))return "User declined the file deletion.";
+  if(agentDeadlineReached(pendingAgentRun))return "The run window expired before the file deletion started. Resume the task to continue.";
   const data=await workspaceRequest({action:"delete_file",project,path:a.path,confirmed:true});
   if(project===activeProject)await refreshWorkspacePanel();
   return "Deleted "+data.deleted+".";
@@ -649,6 +651,7 @@ async function runTool(name,a){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
   const warning="The agent wants to run this allowlisted command in project '"+project+"':\n\n"+a.command+"\n\nThis may install packages or run project scripts on your computer. Only approve if you trust the project and command.\n\nRun it?";
   if(!(activeAgentPermissionMode==="trusted"&&project===activeAgentPermissionWorkspaceId)&&!confirm(warning))return "User declined command execution. Do not retry unless the user asks.";
+  if(agentDeadlineReached(pendingAgentRun))return "The run window expired before the command started. Resume the task to continue.";
   const remainingSeconds=Number(pendingAgentRun?.deadlineAt)>0?Math.min(600,Math.max(1,Math.floor((Number(pendingAgentRun.deadlineAt)-Date.now())/1000))):undefined;
   const data=await workspaceRequest({action:"run_command",project,command:a.command,timeout_seconds:remainingSeconds});
   if(data.exit_code!==0)throw new Error("Command failed with exit code "+data.exit_code+(data.timed_out?" (timed out)":"")+". Output:\n"+(data.output||"(No command output)"));
@@ -657,6 +660,7 @@ async function runTool(name,a){
  if(name==="workspace_start_project"){
   const project=String(a.project||activeProject||"");if(!project)throw Error("Select or create a project first.");
   if(!(activeAgentPermissionMode==="trusted"&&project===activeAgentPermissionWorkspaceId)&&!confirm("Start this project's development process on your computer? The project code will run locally. Only approve trusted files."))return "User declined starting the project server.";
+  if(agentDeadlineReached(pendingAgentRun))return "The run window expired before the development server started. Resume the task to continue.";
   const data=await workspaceRequest({action:"start_project",project});
   if(project===activeProject)await refreshWorkspacePanel();
   return "Development server started. Runtime: "+data.runtime+". URL: "+data.url+" (local computer only). PID: "+data.pid;
