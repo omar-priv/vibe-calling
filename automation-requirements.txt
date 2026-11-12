@@ -1,0 +1,2 @@
+playwright>=1.55,<2
+pywinauto>=0.6.9,<0.7; platform_system == "Windows"
