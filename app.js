@@ -500,7 +500,9 @@ async function workspaceRequest(payload){
  return data;
 }
 function setActiveProject(project){
- activeProject=project||"";
+ const next=project||"";
+ if(next!==activeProject&&$("#agentPermissionMode")?.value==="trusted")$("#agentPermissionMode").value="confirm";
+ activeProject=next;
  if(activeProject)localStorage.setItem(activeProjectKey,activeProject);else localStorage.removeItem(activeProjectKey);
 }
 async function refreshWorkspacePanel(){
