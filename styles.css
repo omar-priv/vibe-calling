@@ -1208,3 +1208,34 @@ button:disabled, select:disabled {
   border-color: var(--cyan);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--cyan) 16%, transparent);
 }
+
+
+/* Background Agent and optional local automation controls */
+.automation-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
+  margin: 14px 0;
+}
+.automation-options .workspace-folder-hint {
+  display: block;
+  margin: -5px 0 4px 27px;
+  color: var(--text-muted, #8b93a5);
+  font-size: 12px;
+  line-height: 1.45;
+}
+#agentWorkerStatus {
+  overflow-wrap: anywhere;
+  min-height: 42px;
+}
+#resumeBackgroundAgentBtn[hidden],
+#cancelBackgroundAgentBtn[hidden] {
+  display: none !important;
+}
+@media (min-width: 760px) {
+  .automation-options {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    column-gap: 18px;
+  }
+}
