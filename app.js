@@ -1398,6 +1398,21 @@ $("#agentPermissionMode").addEventListener("change",e=>{
 $("#researchMode").addEventListener("change",e=>{researchMode=["off","web","deep"].includes(e.target.value)?e.target.value:"off";write(KEYS.researchMode,researchMode);syncToolState();toast(researchMode==="deep"?"Deep Research selected":researchMode==="web"?"Web Research selected":"Research mode off")});
 $("#projectSelect").addEventListener("change",e=>{setActiveProject(e.target.value);refreshWorkspacePanel()});
 $("#skillFileInput").addEventListener("change",async e=>{for(const file of [...e.target.files])await installSkillFile(file);e.target.value=""});
+function saveAutomationPref(key,value){
+ automationPrefs={...automationPrefs,[key]:!!value};write(AUTOMATION_PREFS_KEY,automationPrefs);
+ if(key==="browser"||key==="computer")toast("Automation setting saved. Optional dependencies may be required.");
+}
+$("#enableBackgroundWorker")?.addEventListener("change",e=>saveAutomationPref("background",e.target.checked));
+$("#enableBrowserAutomation")?.addEventListener("change",e=>saveAutomationPref("browser",e.target.checked));
+$("#enableComputerUse")?.addEventListener("change",e=>saveAutomationPref("computer",e.target.checked));
+$("#enableGuardedTerminal")?.addEventListener("change",e=>saveAutomationPref("terminal",e.target.checked));
+$("#refreshAgentWorkerStatusBtn")?.addEventListener("click",refreshAgentWorkerStatus);
+$("#resumeBackgroundAgentBtn")?.addEventListener("click",resumeBackgroundAgent);
+$("#cancelBackgroundAgentBtn")?.addEventListener("click",()=>{if(confirm("Stop the currently queued or running background Agent task? Completed file changes will remain saved."))cancelBackgroundAgent()});
+$("#installAutomationGuideBtn")?.addEventListener("click",()=>window.alert(
+ "Optional automation install (Windows):\\n\\n1. Extract the latest Vibe Calling ZIP.\\n2. Open the project folder in File Explorer.\\n3. Double-click install-automation.bat.\\n4. It installs Playwright + pywinauto and downloads Chromium.\\n5. Restart Vibe Calling, then enable Browser Automation and/or Computer Use.\\n\\nThe browser package and Chromium download are optional and may use several hundred MB. Computer Use requires an unlocked Windows desktop session."
+));
+
 function init(){try{filterSavedFreeModels();$("#researchMode").value=researchMode;syncToolState();renderProviders();renderModels();renderNvidiaCatalog();renderHistory();renderChat();renderPendingAttachments();refreshWorkspacePanel();refreshSkills();renderMcpStatus();renderRemoteMcpStatus();refreshAgentWorkerStatus();console.info("Vibe Calling initialized");if(mcpConfig.connected&&mcpConfig.token)connectGitHubMcp();if(remoteMcpConfig.connected&&remoteMcpConfig.url)connectRemoteMcp()}catch(e){fatal(e.stack||e.message||String(e))}}
 init();
 window.__vibeAppReady = true;
