@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import agent_process
 import agent_runtime
+import agent_worker
 import server
 
 PYTHON_EXECUTABLE = shutil.which("python") or shutil.which("python3")
@@ -79,10 +80,67 @@ class AgentRuntimeStorageTests(unittest.TestCase):
         agent_runtime.worker_heartbeat(os.getpid())
         self.assertTrue(agent_runtime.worker_status()["running"])
 
+    def test_idle_worker_does_not_release_slot_when_queue_has_work(self):
+        self._insert_job(job_id="queued-job", status="queued")
+        agent_runtime.worker_heartbeat(os.getpid())
+        self.assertFalse(agent_runtime.release_worker_if_idle(os.getpid()))
+        with agent_runtime.connect() as db:
+            db.execute("UPDATE jobs SET status='cancelled' WHERE id='queued-job'")
+        self.assertTrue(agent_runtime.release_worker_if_idle(os.getpid()))
+
+    def test_cancelled_queued_job_is_not_left_stuck_in_queue(self):
+        self._insert_job(job_id="queued-job", status="queued")
+        result = agent_runtime.request_cancel("queued-job")
+        job = agent_runtime.get_job("queued-job")
+        self.assertTrue(result["ok"])
+        self.assertEqual(job["status"], "cancelled")
+        self.assertTrue(job["cancel_requested"])
+
+    def test_completed_result_and_error_are_protected_and_recovered(self):
+        self._insert_job()
+        with patch("agent_runtime._dpapi", side_effect=lambda value, decrypt=False: bytes(value)):
+            agent_runtime.complete_job("job-test", "failed", error="provider error detail")
+            job = agent_runtime.get_job("job-test")
+        self.assertEqual(job["status"], "failed")
+        self.assertEqual(job["last_error"], "provider error detail")
+
     @unittest.skipUnless(os.name == "nt", "DPAPI is available only on Windows")
     def test_dpapi_round_trip_protects_provider_secret(self):
         secret = "do-not-write-api-key-to-disk"
         self.assertEqual(agent_runtime.unprotect_secret(agent_runtime.protect_secret(secret)), secret)
+
+
+class BackgroundWorkspaceToolTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.old_root = server.WORKSPACE_ROOT
+        self.old_roots = server.WORKSPACE_ROOTS
+        server.WORKSPACE_ROOT = Path(self.temp.name) / "projects"
+        server.WORKSPACE_ROOT.mkdir()
+        server.WORKSPACE_ROOTS = {}
+        (server.WORKSPACE_ROOT / "demo").mkdir()
+
+    def tearDown(self):
+        server.WORKSPACE_ROOT = self.old_root
+        server.WORKSPACE_ROOTS = self.old_roots
+        self.temp.cleanup()
+
+    def test_worker_workspace_read_write_move_and_delete(self):
+        payload = {"activeProject": "demo", "permissionMode": "trusted",
+                   "permissionWorkspaceId": "demo"}
+        write_result = agent_worker.execute_tool("job-test", "workspace_write_file",
+                                                  {"path": "src/main.py", "content": "print('ok')"}, payload)
+        self.assertIn("Saved src/main.py", write_result)
+        read_result = agent_worker.execute_tool("job-test", "workspace_read_file",
+                                                 {"path": "src/main.py"}, payload)
+        self.assertIn("print('ok')", read_result)
+        move_result = agent_worker.execute_tool("job-test", "workspace_move_file",
+                                                 {"source": "src/main.py", "destination": "src/renamed.py"}, payload)
+        self.assertIn("src/main.py to src/renamed.py", move_result)
+        delete_result = agent_worker.execute_tool("job-test", "workspace_delete_file",
+                                                   {"path": "src/renamed.py"}, payload)
+        self.assertIn("Deleted src/renamed.py", delete_result)
+        self.assertFalse((server.WORKSPACE_ROOT / "demo" / "src" / "renamed.py").exists())
 
 
 class GuardedProcessTests(unittest.TestCase):
