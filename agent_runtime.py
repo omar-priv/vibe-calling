@@ -264,6 +264,26 @@ def worker_stopped(pid: int) -> None:
                    (pid,))
 
 
+def _pid_is_alive(pid: int) -> bool:
+    if not pid or pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+            if not handle:
+                return False
+            try:
+                code = ctypes.c_ulong()
+                return bool(ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259
+            finally:
+                ctypes.windll.kernel32.CloseHandle(handle)
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def worker_status() -> dict[str, Any]:
     initialize()
     with connect() as db:
@@ -271,7 +291,7 @@ def worker_status() -> dict[str, Any]:
         counts = {r["status"]: r["count"] for r in db.execute(
             "SELECT status,COUNT(*) AS count FROM jobs GROUP BY status"
         ).fetchall()}
-    alive = bool(row and row["pid"] and time.time() - float(row["heartbeat"] or 0) < STALE_WORKER_SECONDS)
+    alive = bool(row and row["pid"] and _pid_is_alive(int(row["pid"])))
     return {"running": alive, "pid": row["pid"] if alive else None,
             "heartbeat_age": round(time.time() - float(row["heartbeat"] or 0), 1) if alive else None,
             "jobs": counts}
@@ -317,13 +337,15 @@ def request_cancel(job_id: str) -> dict[str, Any]:
 
 def resume_job(job_id: str) -> dict[str, Any]:
     with connect() as db:
-        row = db.execute("SELECT status,current_tool_json FROM jobs WHERE id=?", (job_id,)).fetchone()
+        row = db.execute("SELECT status,checkpoint_json FROM jobs WHERE id=?", (job_id,)).fetchone()
         if not row:
             raise ValueError("Agent job was not found.")
         if row["status"] not in {"paused", "failed"}:
             raise ValueError("Only a paused or failed task can be resumed.")
-        db.execute("UPDATE jobs SET status='queued',cancel_requested=0,last_error=NULL,updated_at=? WHERE id=?",
-                   (time.time(), job_id))
+        checkpoint = json.loads(row["checkpoint_json"] or "{}")
+        checkpoint["resume_window"] = True
+        db.execute("UPDATE jobs SET status='queued',cancel_requested=0,last_error=NULL,checkpoint_json=?,updated_at=? WHERE id=?",
+                   (json.dumps(checkpoint, ensure_ascii=False), time.time(), job_id))
     add_event(job_id, "resumed", "Task added back to the worker queue.")
     ensure_worker()
     return {"ok": True, "status": "queued"}
@@ -390,14 +412,30 @@ def claim_next_job(pid: int) -> str | None:
     return job_id
 
 
+def get_pending_approvals(job_id: str) -> list[dict[str, Any]]:
+    with connect() as db:
+        rows = db.execute("SELECT id,created_at,details_json FROM approvals WHERE job_id=? AND status='pending' ORDER BY created_at",
+                          (job_id,)).fetchall()
+    result = []
+    for row in rows:
+        try:
+            details = json.loads(row["details_json"])
+        except json.JSONDecodeError:
+            details = {}
+        result.append({"approval_id": row["id"], "created_at": row["created_at"], **details})
+    return result
+
+
 def mark_running_jobs_interrupted() -> None:
     with connect() as db:
-        rows = db.execute("SELECT id,current_tool_json FROM jobs WHERE status IN ('running','awaiting_approval')").fetchall()
+        rows = db.execute("SELECT id FROM jobs WHERE status IN ('running','awaiting_approval')").fetchall()
         for row in rows:
             note = "Worker restarted while a tool call was in progress. Its outcome may be unknown; inspect the workspace before retrying."
             db.execute("UPDATE jobs SET status='paused',last_error=?,updated_at=? WHERE id=?",
                        (note, time.time(), row["id"]))
-            add_event(row["id"], "interrupted", note)
+    for row in rows:
+        add_event(row["id"], "interrupted",
+                  "Worker restarted while a tool call was in progress. Its outcome may be unknown; inspect the workspace before retrying.")
 
 
 def cancel_requested(job_id: str) -> bool:
