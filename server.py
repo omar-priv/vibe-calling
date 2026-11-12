@@ -1902,7 +1902,8 @@ class Handler(SimpleHTTPRequestHandler):
                 automation = agent_automation.capabilities()
             except Exception:
                 automation = {"browser": False, "computer": False, "platform": sys.platform}
-            self.send_json(200, {"ok": True, "worker": agent_runtime.worker_status(),
+            self.send_json(200, {"ok": True, "supported": os.name == "nt",
+                                 "worker": agent_runtime.worker_status(),
                                  "automation": automation, "storage": "DPAPI + SQLite" if os.name == "nt" else "Windows-only worker"})
             return
         if action == "enqueue":

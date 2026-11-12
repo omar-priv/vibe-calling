@@ -374,7 +374,7 @@ def run_job(job_id: str) -> None:
                             output = execute_tool(job_id, name, args, payload)
                         except Exception as exc:
                             output = "TOOL ERROR: " + str(exc)[:3000]
-                            event(job_id, "tool_error", name + " failed: " + str(exc)[:1000])
+                            event(job_id, "tool_error", name + " failed. See the encrypted task history for details.")
                         history.append({"role": "tool", "tool_call_id": call_id, "content": str(output)[:30000]})
                         cp["pending_tool_call"] = None
                         cp["history"] = history
@@ -408,7 +408,13 @@ def run_job(job_id: str) -> None:
         except Exception:
             pass
         runtime.complete_job(job_id, "failed", error=detail)
-        event(job_id, "error", detail)
+        event(job_id, "error", "Background Agent failed. The encrypted task checkpoint was retained.")
+    finally:
+        try:
+            import agent_automation
+            agent_automation.cleanup_browser_session(job_id)
+        except Exception:
+            pass
 
 
 def main() -> int:
