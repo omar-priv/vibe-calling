@@ -47,7 +47,17 @@ class _WindowsJob:
                 ("PeakJobMemoryUsed", ctypes.c_size_t),
             ]
 
-        kernel = ctypes.windll.kernel32
+        kernel = ctypes.WinDLL("Kernel32.dll", use_last_error=True)
+        kernel.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        kernel.CreateJobObjectW.restype = wintypes.HANDLE
+        kernel.SetInformationJobObject.argtypes = [wintypes.HANDLE, wintypes.INT, ctypes.c_void_p, wintypes.DWORD]
+        kernel.SetInformationJobObject.restype = wintypes.BOOL
+        kernel.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        kernel.AssignProcessToJobObject.restype = wintypes.BOOL
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle.restype = wintypes.BOOL
+        kernel.ResumeThread.argtypes = [wintypes.HANDLE]
+        kernel.ResumeThread.restype = wintypes.DWORD
         handle = kernel.CreateJobObjectW(None, None)
         if not handle:
             raise ctypes.WinError()
@@ -60,18 +70,26 @@ class _WindowsJob:
             kernel.CloseHandle(handle)
             raise error
         self.handle = handle
+        self.kernel = kernel
 
     def assign(self, process: subprocess.Popen) -> None:
         if self.handle is None:
             return
         import ctypes
-        if not ctypes.windll.kernel32.AssignProcessToJobObject(self.handle, int(process._handle)):
-            raise ctypes.WinError()
+        if not self.kernel.AssignProcessToJobObject(self.handle, int(process._handle)):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def resume(self, process: subprocess.Popen) -> None:
+        if os.name != "nt":
+            return
+        import ctypes
+        result = self.kernel.ResumeThread(int(process._thread))
+        if result == 0xFFFFFFFF:
+            raise ctypes.WinError(ctypes.get_last_error())
 
     def close(self) -> None:
         if self.handle is not None:
-            import ctypes
-            ctypes.windll.kernel32.CloseHandle(self.handle)
+            self.kernel.CloseHandle(self.handle)
             self.handle = None
 
 
@@ -81,7 +99,7 @@ def run(command: Sequence[str], *, cwd: str, env: dict[str, str], timeout: int,
     if not command or not all(isinstance(item, str) for item in command):
         raise ValueError("A parsed argument list is required.")
     job = _WindowsJob(memory_mb=memory_mb)
-    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+    creationflags = (getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | 0x00000004) if os.name == "nt" else 0
     process = None
     try:
         process = subprocess.Popen(
@@ -90,7 +108,10 @@ def run(command: Sequence[str], *, cwd: str, env: dict[str, str], timeout: int,
             encoding="utf-8", errors="replace", shell=False,
             creationflags=creationflags, start_new_session=(os.name != "nt"),
         )
+        # Windows children start suspended so the Job Object is assigned before
+        # the command's first instruction can execute.
         job.assign(process)
+        job.resume(process)
         try:
             stdout, stderr = process.communicate(timeout=max(1, min(600, int(timeout))))
             output = ((stdout or "") + (("\n" + stderr) if stderr else "")).strip()
