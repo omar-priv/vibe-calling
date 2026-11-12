@@ -129,6 +129,84 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not recognized as FastAPI or Flask"):
             server.start_project_server("demo")
 
+    def test_filename_search_finds_only_visible_workspace_files(self):
+        root = server.WORKSPACE_ROOT / "demo"
+        (root / "src").mkdir()
+        (root / "src" / "main.py").write_text("needle = 'present'", encoding="utf-8")
+        (root / ".env").write_text("needle=secret", encoding="utf-8")
+        result = server.find_project_files("demo", "main")
+        self.assertEqual([item["path"] for item in result], ["src/main.py"])
+
+    def test_text_search_returns_paths_lines_and_excludes_secrets(self):
+        root = server.WORKSPACE_ROOT / "demo"
+        (root / "src").mkdir()
+        (root / "src" / "main.py").write_text("first line\nneedle = 'visible'\nthird line", encoding="utf-8")
+        (root / ".env").write_text("needle=secret", encoding="utf-8")
+        result = server.search_project_text("demo", "needle")
+        self.assertEqual(len(result["matches"]), 1)
+        self.assertEqual(result["matches"][0]["path"], "src/main.py")
+        self.assertEqual(result["matches"][0]["line"], 2)
+        self.assertNotIn("secret", result["matches"][0]["text"])
+
+    def test_python_project_script_is_allowed_but_path_escape_is_not(self):
+        root = server.WORKSPACE_ROOT / "demo"
+        (root / "check.py").write_text("print('ok')", encoding="utf-8")
+        with patch.object(server.shutil, "which", return_value="/usr/bin/python"):
+            completed = type("Completed", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+            with patch.object(server.subprocess, "run", return_value=completed) as run:
+                result = server.run_project_command("demo", "python check.py")
+        self.assertEqual(result["exit_code"], 0)
+        run.assert_called_once()
+        with self.assertRaises(ValueError):
+            server.run_project_command("demo", "python ../outside.py")
+
+
+
+class SelectedWorkspaceTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.old_roots = server.WORKSPACE_ROOTS
+        self.old_registry = server.WORKSPACE_REGISTRY_FILE
+        server.WORKSPACE_ROOTS = {}
+        server.WORKSPACE_REGISTRY_FILE = Path(self.temp.name) / "workspace-roots.json"
+        self.folder = Path(self.temp.name) / "existing-project"
+        self.folder.mkdir()
+
+    def tearDown(self):
+        server.WORKSPACE_ROOTS = self.old_roots
+        server.WORKSPACE_REGISTRY_FILE = self.old_registry
+        self.temp.cleanup()
+
+    def test_selected_folder_is_registered_and_persisted(self):
+        selected = server.register_workspace_folder(str(self.folder))
+        self.assertTrue(selected["id"].startswith("local-"))
+        self.assertEqual(Path(selected["path"]), self.folder.resolve())
+        self.assertEqual(server.project_dir(selected["id"]), self.folder.resolve())
+        loaded = server.load_workspace_roots()
+        self.assertEqual(loaded[selected["id"]]["path"], str(self.folder.resolve()))
+
+    def test_selected_folder_allows_safe_relative_files_only(self):
+        selected = server.register_workspace_folder(str(self.folder))
+        (self.folder / "src").mkdir()
+        (self.folder / "src" / "main.py").write_text("print('hello')", encoding="utf-8")
+        _, target = server.safe_workspace_path(selected["id"], "src/main.py")
+        self.assertEqual(target.read_text(encoding="utf-8"), "print('hello')")
+        with self.assertRaises(ValueError):
+            server.safe_workspace_path(selected["id"], "../outside.txt")
+        with self.assertRaises(ValueError):
+            server.safe_workspace_path(selected["id"], ".env")
+
+    def test_selected_workspace_root_cannot_be_home_or_drive_root(self):
+        with self.assertRaises(ValueError):
+            server.register_workspace_folder(str(Path.home()))
+        with self.assertRaises(ValueError):
+            server.register_workspace_folder(str(Path(self.folder.anchor)))
+
+    def test_duplicate_folder_selection_reuses_existing_id(self):
+        first = server.register_workspace_folder(str(self.folder))
+        second = server.register_workspace_folder(str(self.folder))
+        self.assertEqual(first["id"], second["id"])
+        self.assertTrue(second["existing"])
 
 
 class FrontendBundleTests(unittest.TestCase):
@@ -171,6 +249,8 @@ class FrontendBundleTests(unittest.TestCase):
         self.assertNotIn("startStep+24", app)
         self.assertNotIn("n<startStep+24", app)
         self.assertIn("while(true){", app)
+        self.assertIn("agentDeadlineReached(state)", app)
+        self.assertIn("permissionWorkspaceId", app)
         self.assertIn("state.turnBudget=(", app)
         self.assertIn("state.toolBudget=(", app)
         self.assertIn("continuing autonomously", app)
@@ -185,8 +265,9 @@ class FrontendBundleTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         app = (root / "app.js").read_text(encoding="utf-8")
         for name in (
-            "workspace_create_project", "workspace_list_files", "workspace_read_file",
-            "workspace_write_file", "workspace_delete_file", "workspace_run_command",
+            "workspace_create_project", "workspace_list_files", "workspace_find_files",
+            "workspace_search_text", "workspace_create_directory", "workspace_move_file",
+            "workspace_read_file", "workspace_write_file", "workspace_delete_file", "workspace_run_command",
             "workspace_preview", "workspace_start_project", "workspace_stop_project",
             "workspace_project_status", "workspace_read_memory", "workspace_update_memory",
             "runAgentLoop", "relevantSkillInstructions", "saveAgentResume", "continueAgentRun",
@@ -249,7 +330,9 @@ class FrontendBundleTests(unittest.TestCase):
                            "githubPatInput", "githubReadOnly", "connectGithubMcp",
                            "remoteMcpUrl", "remoteMcpToken", "remoteMcpReadOnly",
                            "saveRemoteMcpSettings", "connectRemoteMcp",
-                           "nvidiaCatalogGrid", "researchMode", "remoteBrowserHeading", "startProjectBtn", "stopProjectBtn", "projectMemoryPreview", "projectRuntimeStatus"):
+                           "nvidiaCatalogGrid", "researchMode", "remoteBrowserHeading", "startProjectBtn", "stopProjectBtn", "projectMemoryPreview", "projectRuntimeStatus",
+                           "openWorkspaceFolderBtn", "workspaceSearchInput", "workspaceSearchBtn", "workspaceSearchResults",
+                           "agentDuration", "agentPermissionMode", "agentRunClock", "agentRunUsage"):
             self.assertIn('id="' + element_id + '"', html)
 
     def test_chat_switch_and_delete_are_blocked_during_active_response(self):
