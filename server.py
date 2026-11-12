@@ -1123,24 +1123,79 @@ def run_project_command(project_id, command, timeout_seconds=None):
     if not resolved:
         raise ValueError(f"'{parts[0]}' is not installed or not on PATH.")
     final_args = [resolved] + args
-    try:
-        if os.name == "nt" and resolved.lower().endswith((".cmd", ".bat")):
-            command_line = subprocess.list2cmdline(final_args)
-            completed = subprocess.run(
-                [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command_line],
-                cwd=str(base), capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=command_timeout, shell=False
-            )
-        else:
-            completed = subprocess.run(
-                final_args, cwd=str(base), capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=command_timeout, shell=False
-            )
-    except subprocess.TimeoutExpired as exc:
-        output = (exc.stdout or "") + "\n" + (exc.stderr or "")
-        return {"exit_code": 124, "timed_out": True, "output": output[-30000:]}
-    output = ((completed.stdout or "") + ("\n" + completed.stderr if completed.stderr else "")).strip()
-    return {"exit_code": completed.returncode, "timed_out": False, "output": output[-30000:]}
+    if os.name == "nt" and resolved.lower().endswith((".cmd", ".bat")):
+        command_line = subprocess.list2cmdline(final_args)
+        final_args = [os.environ.get("COMSPEC", "cmd.exe"), "/d", "/s", "/c", command_line]
+    safe_env = {}
+    allowed_env = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE",
+                   "PROGRAMFILES", "PROGRAMFILES(X86)", "COMMONPROGRAMFILES", "NUMBER_OF_PROCESSORS"}
+    for key, value in os.environ.items():
+        if key.upper() in allowed_env:
+            safe_env[key] = value
+    private_temp = base / ".vibe" / "tmp"
+    private_temp.mkdir(parents=True, exist_ok=True)
+    safe_env["TEMP"] = str(private_temp)
+    safe_env["TMP"] = str(private_temp)
+    safe_env["PYTHONDONTWRITEBYTECODE"] = "1"
+    safe_env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
+    safe_env["npm_config_update_notifier"] = "false"
+    import agent_process
+    return agent_process.run(final_args, cwd=str(base), env=safe_env,
+                             timeout=command_timeout, memory_mb=1536, max_output=30000)
+
+
+def run_guarded_terminal(project_id, command, timeout_seconds=300):
+    """Run one user-approved terminal command without shell chaining.
+
+    This uses a Windows Job Object for process-tree/resource limits, not a
+    filesystem or network sandbox. It always needs a per-command approval.
+    """
+    base = project_dir(project_id)
+    if not isinstance(command, str) or not command.strip() or len(command) > 1500:
+        raise ValueError("Enter one terminal command (maximum 1,500 characters).")
+    if any(char in command for char in ("\x00", "\r", "\n", ";", "&", "|", "<", ">", "\x60", "$", "%", "!", "^")):
+        raise ValueError("Run one command at a time. Shell operators and environment expansion are blocked.")
+    token_pattern = re.compile(r'"([^"]*)"|\\'([^\\']*)\\'|([^\\s]+)')
+    parts = []
+    for match in token_pattern.finditer(command.strip()):
+        token = next((part for part in match.groups() if part is not None), "")
+        if not token:
+            continue
+        if len(token) > 500 or ".." in Path(token).parts:
+            raise ValueError("The command contains an invalid or out-of-workspace path.")
+        parts.append(token)
+    if not parts:
+        raise ValueError("Empty terminal command.")
+    executable_name = parts[0]
+    if Path(executable_name).is_absolute() or (":" in executable_name and len(executable_name) > 1):
+        raise ValueError("Use an executable available on PATH; absolute executable paths are blocked.")
+    resolved = shutil.which(executable_name)
+    if not resolved:
+        try:
+            _, candidate = safe_workspace_path(project_id, executable_name)
+            if candidate.is_file() and not candidate.is_symlink():
+                resolved = str(candidate)
+        except ValueError:
+            resolved = None
+    if not resolved:
+        raise ValueError("The executable is not available on PATH or inside the selected workspace.")
+    timeout = 300
+    if isinstance(timeout_seconds, int) and not isinstance(timeout_seconds, bool):
+        timeout = max(1, min(600, timeout_seconds))
+    safe_env = {}
+    allowed_env = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "SYSTEMDRIVE",
+                   "PROGRAMFILES", "PROGRAMFILES(X86)", "COMMONPROGRAMFILES", "NUMBER_OF_PROCESSORS"}
+    for key, value in os.environ.items():
+        if key.upper() in allowed_env:
+            safe_env[key] = value
+    private_temp = base / ".vibe" / "tmp"
+    private_temp.mkdir(parents=True, exist_ok=True)
+    safe_env["TEMP"] = str(private_temp)
+    safe_env["TMP"] = str(private_temp)
+    safe_env["PYTHONDONTWRITEBYTECODE"] = "1"
+    import agent_process
+    return agent_process.run([resolved] + parts[1:], cwd=str(base), env=safe_env,
+                             timeout=timeout, memory_mb=1536, max_output=30000)
 
 
 
