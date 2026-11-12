@@ -367,9 +367,9 @@ def run_job(job_id: str) -> None:
                         checkpoint(job_id, cp)
                         with runtime.connect() as db:
                             db.execute("UPDATE jobs SET current_tool_json=?,updated_at=? WHERE id=?",
-                                       (json.dumps({"name": name, "arguments": args}, ensure_ascii=False)[:12000],
+                                       (json.dumps({"name": name}, ensure_ascii=False),
                                         time.time(), job_id))
-                        event(job_id, "tool_start", "Running tool: " + name, {"tool": name, "arguments": args})
+                        event(job_id, "tool_start", "Running tool: " + name, {"tool": name})
                         try:
                             output = execute_tool(job_id, name, args, payload)
                         except Exception as exc:
@@ -384,7 +384,7 @@ def run_job(job_id: str) -> None:
                         with runtime.connect() as db:
                             db.execute("UPDATE jobs SET current_tool_json=NULL,status='running',updated_at=? WHERE id=?",
                                        (time.time(), job_id))
-                        event(job_id, "tool_result", "Tool finished: " + name, {"tool": name, "result": str(output)[:2500]})
+                        event(job_id, "tool_result", "Tool finished: " + name, {"tool": name})
                     except Exception as exc:
                         history.append({"role": "tool", "tool_call_id": call_id, "content": "Tool execution failed: " + str(exc)[:2000]})
                         cp["pending_tool_call"] = None

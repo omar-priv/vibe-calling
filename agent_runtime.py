@@ -220,7 +220,7 @@ def list_recent_jobs(limit: int = 10) -> list[dict[str, Any]]:
     initialize()
     with connect() as db:
         rows = db.execute(
-            "SELECT id,status,created_at,updated_at,result_text,last_error FROM jobs "
+            "SELECT id,status,created_at,updated_at,last_error FROM jobs "
             "ORDER BY created_at DESC LIMIT ?", (max(1, min(30, int(limit))),)
         ).fetchall()
     return [dict(row) for row in rows]
