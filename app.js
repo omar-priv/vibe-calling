@@ -730,6 +730,10 @@ async function buildHistoryWithAttachments(messages,systemMessage){
 }
 function setAgentProgress(message){const el=$("#agentProgress");if(el)el.textContent=message||""}
 function agentDeadlineReached(state){return Number(state?.deadlineAt)>0&&Date.now()>=Number(state.deadlineAt)}
+function selectedAgentDuration(){
+ const value=Number($("#agentDuration")?.value);
+ return Number.isFinite(value)&&value>=0?value:300;
+}
 function updateAgentRunStats(state){
  const clock=$("#agentRunClock"),usage=$("#agentRunUsage");
  if(clock){
@@ -1034,7 +1038,7 @@ async function send(text,attachments=[]){
   }
   const history=await buildHistoryWithAttachments(current().messages,systemMessage);
   if(agentMode){
-   const durationMinutes=Math.max(0,Number($("#agentDuration")?.value)||300);
+   const durationMinutes=selectedAgentDuration();
    const maxRuntimeMs=durationMinutes===0?0:durationMinutes*60*1000;
    const permissionMode=$("#agentPermissionMode")?.value==="trusted"&&!!activeProject?"trusted":"confirm";
    state={chatId,providerId:q.provider.id,model:q.model,history,used:[],step:0,turns:0,turnBudget:AGENT_MAX_TURNS_PER_RUN,toolCalls:0,toolBudget:AGENT_MAX_TOOL_CALLS_PER_RUN,pendingToolCalls:[],pendingToolIndex:0,pendingToolStatus:"",repeatStreak:0,recentToolOutcomes:[],emptyResponses:0,pauseReason:"",researchMode:researchEnabled?researchMode:"off",prompt:text,permissionMode,maxRuntimeMs,startedAt:Date.now(),deadlineAt:maxRuntimeMs?Date.now()+maxRuntimeMs:0};
@@ -1061,7 +1065,7 @@ async function continueAgentRun(){
  if(busy)return;
  if(!pendingAgentRun){toast("No saved task context is available. Send a follow-up describing what remains.");return}
  const state=pendingAgentRun;
- const durationMinutes=Math.max(0,Number($("#agentDuration")?.value)||300);
+ const durationMinutes=selectedAgentDuration();
  state.maxRuntimeMs=durationMinutes===0?0:durationMinutes*60*1000;
  state.deadlineAt=state.maxRuntimeMs?Date.now()+state.maxRuntimeMs:0;
  state.permissionMode=$("#agentPermissionMode")?.value==="trusted"&&!!activeProject?"trusted":"confirm";
@@ -1117,6 +1121,8 @@ if(b.id==="agentQuick"){$("#agentToggle").checked=!$("#agentToggle").checked;syn
 if(b.id==="toggleKey"){$("#providerKey").type=$("#providerKey").type==="password"?"text":"password";return}
 if(b.id==="testProvider"){testProvider();return}
 if(b.id==="createProjectBtn"){(async()=>{const input=$("#projectNameInput"),name=input.value.trim();if(!name){toast("Enter a project name first.");return}try{const data=await workspaceRequest({action:"create_project",name});setActiveProject(data.project);input.value="";await refreshWorkspacePanel();toast("Project created: "+data.project)}catch(error){toast(error.message)}})();return}
+if(b.id==="openWorkspaceFolderBtn"){(async()=>{b.disabled=true;b.textContent="Choose a folder…";try{const data=await workspaceRequest({action:"choose_workspace"});if(data.cancelled||!data.workspace)return;setActiveProject(data.workspace.id);await refreshWorkspacePanel();toast("Opened local folder: "+data.workspace.name)}catch(error){toast("Could not open folder: "+error.message)}finally{b.disabled=false;b.textContent="Open existing folder"}})();return}
+if(b.id==="workspaceSearchBtn"){(async()=>{const query=$("#workspaceSearchInput").value.trim(),results=$("#workspaceSearchResults");if(!activeProject){toast("Select or open a workspace first.");return}if(!query){toast("Enter text to search.");return}b.disabled=true;b.textContent="Searching…";try{const data=await workspaceRequest({action:"search_text",project:activeProject,query});const matches=data.matches||[];results.hidden=false;results.textContent=matches.length?matches.map(item=>item.path+":"+item.line+"  "+item.text).join("\n"):"No matching text was found.";if(data.truncated)results.textContent+="\n\nResult limit reached; narrow the search.";toast(matches.length+" match(es) found")}catch(error){results.hidden=false;results.textContent="Search failed: "+error.message}finally{b.disabled=false;b.textContent="Search files"}})();return}
 if(b.id==="refreshWorkspaceBtn"){refreshWorkspacePanel();return}
 if(b.id==="startProjectBtn"){(async()=>{if(!activeProject){toast("Select a project first.");return}if(!confirm("Start the development server for '"+activeProject+"'? This runs its project code on your computer."))return;try{const data=await workspaceRequest({action:"start_project",project:activeProject});toast("Project server started: "+data.url);await refreshWorkspacePanel()}catch(error){toast("Could not start project: "+error.message);await refreshWorkspacePanel()}})();return}
 if(b.id==="stopProjectBtn"){(async()=>{if(!activeProject){toast("Select a project first.");return}try{const data=await workspaceRequest({action:"stop_project",project:activeProject});toast(data.stopped||data.preview_stopped?"Project runtime or preview stopped.":"No project process or preview was running.");await refreshWorkspacePanel()}catch(error){toast("Could not stop project: "+error.message)}})();return}
@@ -1172,6 +1178,11 @@ $("#fileInput").addEventListener("change",async e=>{await uploadChatFiles(e.targ
 $("#messageInput").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();$("#chatForm").requestSubmit()}});
 $("#messageInput").addEventListener("input",e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,180)+"px"});
 $("#agentToggle").addEventListener("change",syncToolState);
+$("#agentPermissionMode").addEventListener("change",e=>{
+ if(e.target.value!=="trusted")return;
+ if(!activeProject){e.target.value="confirm";toast("Open or select a workspace before enabling trusted mode.");return;}
+ if(!confirm("Trusted mode will let the Agent write, delete files, and run allowlisted project commands in the active folder without asking every time. It will not access other folders. Only enable this for a project you trust. Continue?"))e.target.value="confirm";
+});
 $("#researchMode").addEventListener("change",e=>{researchMode=["off","web","deep"].includes(e.target.value)?e.target.value:"off";write(KEYS.researchMode,researchMode);syncToolState();toast(researchMode==="deep"?"Deep Research selected":researchMode==="web"?"Web Research selected":"Research mode off")});
 $("#projectSelect").addEventListener("change",e=>{setActiveProject(e.target.value);refreshWorkspacePanel()});
 $("#skillFileInput").addEventListener("change",async e=>{for(const file of [...e.target.files])await installSkillFile(file);e.target.value=""});
