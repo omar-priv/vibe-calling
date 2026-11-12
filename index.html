@@ -143,9 +143,33 @@
           <div class="remote-mcp-guide"><b>How to connect</b><ol><li>Copy the Streamable HTTP endpoint URL from your MCP provider.</li><li>Enter the URL and optional bearer token above, then save.</li><li>Keep read-only mode on and click Connect MCP.</li><li>Enable Agent mode in Chat and ask it to use one of the connected tools.</li></ol></div>
           <p class="mcp-security-note">This connector supports remote HTTPS Streamable HTTP and optional Bearer-token authentication. It does not launch local stdio processes or perform OAuth sign-in. The token is stored in this browser's local storage and is not encrypted. Private/local network URLs are blocked. Unknown or write-capable tools are blocked in read-only mode; turning it off still requires approval for each write call.</p>
         </section>
-        <section class="workspace-panel future-browser-panel" aria-labelledby="remoteBrowserHeading">
-          <div class="workspace-panel-head"><div><div class="eyebrow"><span></span> FUTURE BETA</div><h2 id="remoteBrowserHeading">Remote browser & computer use</h2><p>A server-hosted browser session that lets the Agent inspect real websites, click, type, and capture screenshots without controlling your personal computer.</p></div><span class="beta-pill">PLANNED · NOT CONNECTED</span></div>
-          <p class="mcp-security-note">Kept separate from the current local workspace. This requires an isolated remote browser service, session cleanup, resource limits, and a secure screenshot/action API. No remote browser is running in this build.</p>
+        <section class="workspace-panel future-browser-panel" aria-labelledby="agentWorkerHeading">
+          <div class="workspace-panel-head"><div><div class="eyebrow"><span></span> LOCAL AUTONOMOUS RUNTIME</div><h2 id="agentWorkerHeading">Background Agent & automation</h2><p>Agent tasks run in a separate local Windows process. Closing the browser tab no longer stops an accepted task.</p></div><span class="beta-pill">EXPERIMENTAL · LOCAL</span></div>
+          <div class="workspace-status" id="agentWorkerStatus" role="status" aria-live="polite">Checking background worker…</div>
+          <div class="mcp-controls">
+            <label class="mcp-readonly"><input type="checkbox" id="enableBackgroundWorker" checked /> Run Agent tasks in background</label>
+            <div class="mcp-buttons">
+              <button type="button" class="secondary-button" id="refreshAgentWorkerStatusBtn">Refresh status</button>
+              <button type="button" class="secondary-button" id="resumeBackgroundAgentBtn" hidden>Resume saved task</button>
+              <button type="button" class="danger-button" id="cancelBackgroundAgentBtn" hidden>Stop task</button>
+            </div>
+          </div>
+          <div class="remote-mcp-fields automation-options">
+            <label class="mcp-readonly"><input type="checkbox" id="enableBrowserAutomation" /> Enable Browser Automation</label>
+            <span class="workspace-folder-hint" id="browserDependencyStatus">Optional Playwright dependency is not checked yet.</span>
+            <label class="mcp-readonly"><input type="checkbox" id="enableComputerUse" /> Enable Windows Computer Use</label>
+            <span class="workspace-folder-hint" id="computerDependencyStatus">Optional pywinauto dependency is not checked yet.</span>
+            <label class="mcp-readonly"><input type="checkbox" id="enableGuardedTerminal" checked /> Enable Guarded Terminal</label>
+            <span class="workspace-folder-hint">One command at a time; every command requires approval, including in Autonomous mode.</span>
+          </div>
+          <div class="mcp-controls">
+            <button type="button" class="secondary-button" id="installAutomationGuideBtn">Show optional install steps</button>
+            <a class="secondary-button" href="https://playwright.dev/python/docs/intro" target="_blank" rel="noopener noreferrer">Playwright docs ↗</a>
+            <a class="secondary-button" href="https://github.com/pywinauto/pywinauto" target="_blank" rel="noopener noreferrer">pywinauto ↗</a>
+          </div>
+          <p class="mcp-security-note"><b>Browser Automation:</b> uses a separate Vibe Calling browser profile, not your normal Chrome profile. It blocks local/private network URLs. Page clicks, typing, and key presses require approval.</p>
+          <p class="mcp-security-note"><b>Computer Use:</b> reads Windows UI Automation controls first and can click/type into visible desktop apps after approval. It needs an unlocked, logged-in desktop session; it cannot operate while Windows is locked, logged out, or asleep.</p>
+          <p class="mcp-security-note"><b>Terminal & isolation:</b> Windows Job Objects manage child-process trees and resource limits, but do not isolate files or network. Guarded Terminal runs with your current Windows account and asks before each command. This build does not claim a full OS sandbox. Microsoft MXC's current Windows backends require supported Windows 11 builds; Windows 10 is not silently treated as sandboxed.</p>
         </section>
         <section class="workspace-panel" aria-labelledby="workspaceHeading">
           <div class="workspace-panel-head">
