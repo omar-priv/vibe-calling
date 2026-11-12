@@ -154,11 +154,14 @@ class WorkspaceBoundaryTests(unittest.TestCase):
         with patch.object(server.shutil, "which", return_value="/usr/bin/python"):
             completed = type("Completed", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
             with patch.object(server.subprocess, "run", return_value=completed) as run:
-                result = server.run_project_command("demo", "python check.py")
+                result = server.run_project_command("demo", "python check.py", timeout_seconds=17)
         self.assertEqual(result["exit_code"], 0)
         run.assert_called_once()
+        self.assertEqual(run.call_args.kwargs["timeout"], 17)
         with self.assertRaises(ValueError):
             server.run_project_command("demo", "python ../outside.py")
+        with self.assertRaisesRegex(ValueError, "between 1 and 600"):
+            server.run_project_command("demo", "python check.py", timeout_seconds=601)
 
 
 
