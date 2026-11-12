@@ -215,13 +215,15 @@ def execute_tool(job_id: str, name: str, args: dict, payload: dict) -> str:
         return json.dumps(result, ensure_ascii=False)[:24000]
     if name == "workspace_read_file":
         project = _project(args, payload)
-        relative, target = server.safe_workspace_path(project, args.get("path"))
+        relative = str(args.get("path", ""))
+        _, target = server.safe_workspace_path(project, relative)
         if not target.is_file() or target.stat().st_size > server.MAX_WORKSPACE_FILE_BYTES:
             raise ValueError("File does not exist or exceeds the 2 MB read limit.")
         return "FILE: " + relative + "\n" + target.read_text(encoding="utf-8")
     if name == "workspace_write_file":
         project = _project(args, payload)
-        relative, target = server.safe_workspace_path(project, args.get("path"))
+        relative = str(args.get("path", ""))
+        _, target = server.safe_workspace_path(project, relative)
         value = args.get("content")
         if not isinstance(value, str) or len(value.encode("utf-8")) > server.MAX_WORKSPACE_FILE_BYTES:
             raise ValueError("File content must be text no larger than 2 MB.")
@@ -238,8 +240,10 @@ def execute_tool(job_id: str, name: str, args: dict, payload: dict) -> str:
         return "Created directory " + str(args.get("path"))
     if name == "workspace_move_file":
         project = _project(args, payload)
-        source_rel, source = server.safe_workspace_path(project, args.get("source"))
-        dest_rel, destination = server.safe_workspace_path(project, args.get("destination"))
+        source_rel = str(args.get("source", ""))
+        dest_rel = str(args.get("destination", ""))
+        _, source = server.safe_workspace_path(project, source_rel)
+        _, destination = server.safe_workspace_path(project, dest_rel)
         if not source.is_file() or source.is_symlink() or destination.exists() or destination.is_symlink():
             raise ValueError("Source must exist and destination must be unused.")
         destination.parent.mkdir(parents=True, exist_ok=True)
