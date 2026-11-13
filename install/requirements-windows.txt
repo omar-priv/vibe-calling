@@ -1,0 +1,7 @@
+# Vibe Calling Windows Agent Runtime v2 — runtime dependencies
+# Installed by install/install.bat. Playwright browsers are installed separately
+# via: python -m playwright install chromium
+playwright==1.63.0
+pywinauto==0.6.9
+pywin32==312
+comtypes==1.5.0

@@ -16,3 +16,24 @@ user_skills/
 # Local folder registrations contain private absolute paths.
 .workspace-roots.json
 .workspace-roots.json.tmp
+
+# OpenCode per-session memory (not part of the project).
+.memory/
+
+# Windows Agent Runtime v2 runtime artifacts (created under LOCALAPPDATA and
+# beside the launcher; not part of the repository).
+worker-stdout.log
+worker-stderr.log
+agent-tasks.db
+agent-tasks.db-wal
+agent-tasks.db-shm
+.vibe-calling-runtime/
+
+# Browser/Computer/sandbox runtime data (isolated per-install).
+browser_profile/
+browser_staging/
+computer_screenshots/
+sandbox_workspace/
+
+# Runtime task database must never ship with source/release archives.
+Vibe Calling/agent-tasks.db*

@@ -68,7 +68,15 @@ Agent-created projects live under `projects/<project-id>/`. A folder selected by
 - **Autonomous · active folder**: after a separate warning and user consent, the agent may delete/move files and run allowlisted project commands without repeating confirmations, but only inside the exact workspace selected when that task started. The permission does not follow the agent if it creates or selects another project.
 - GitHub MCP and remote MCP write actions retain their own per-call approval controls.
 
-The Python server binds only to `127.0.0.1`. Project commands execute on the user's computer. The command allowlist is not an OS-level sandbox: a project script can still access resources available to the Windows user account. Only enable autonomous mode for code you trust. Long-running tasks execute in the browser tab; keep the tab open and the computer awake. Checkpoints let you resume after a tab/browser interruption, but this is not a Windows background service. Dynamic preview servers are supported only for the existing Vite, Next.js, FastAPI, and Flask launch patterns; actual browser automation and computer use are not connected yet.
+The Python server binds only to `127.0.0.1`. Project commands execute on the user's computer. The command allowlist is not an OS-level sandbox: a project script can still access resources available to the Windows user account. Only enable autonomous mode for code you trust. The interactive, model-driven Agent loop runs in the browser tab. Checkpoints let you resume after a tab/browser interruption, but model reasoning does not continue after the tab closes. Dynamic preview servers are supported only for the existing Vite, Next.js, FastAPI, and Flask launch patterns.
+
+### Local Windows Agent Runtime v2
+
+The local Windows build has a separate `worker.worker` process that stores queued tasks in SQLite and executes the pending tool calls already recorded in a task checkpoint. It can remain running after the Vibe Calling browser tab closes, but it does **not** yet issue new provider/LLM requests or continue the Agent's multi-turn reasoning. Do not describe this as a fully autonomous background model loop.
+
+Local Browser automation uses Playwright Chromium. Local Computer Use uses pywinauto in the signed-in interactive desktop session. The direct adapter API serializes actions on a single thread because Playwright's synchronous API is thread-affine. Computer click/type/hotkey and browser file upload/download require user confirmation. Remote Browser / Computer Use is still a planned Beta feature; no remote service is connected.
+
+The sandbox terminal is disabled in this build. The current implementation does not enforce an AppContainer/restricted process token, filesystem boundary, or network isolation. `workspace_run_command` remains a separately approval-gated, allowlisted command runner, but it executes under the signed-in user's ordinary Windows permissions and must not be treated as isolated execution.
 
 ## What is MCP?
 
@@ -173,7 +181,7 @@ The task checkpoint is stored in browser localStorage and survives page reloads 
 
 A loop guard pauses the task when an identical tool call (same tool, inputs, and output) appears at least four times within the last 12 tool calls, including alternating tool cycles. Repeated empty model responses also pause the run. Older conversation/tool history is periodically compacted into a factual work-log checkpoint to control context and browser storage growth; the agent is instructed to re-open files and verify state instead of trusting compacted details as current truth.
 
-Stopping a run aborts the active model request. Completed project changes remain saved. A provider must still be configured in the browser to resume a task. This is not a background worker: the browser tab and local Vibe Calling server must remain running for the agent to make progress. Closing the browser pauses execution; the task can be resumed later, but it does not continue while the browser is closed.
+Stopping a run aborts the active model request. Completed project changes remain saved. A provider must still be configured in the browser to resume a task. Closing the browser pauses the model-driven Agent loop; the separate Windows worker can finish only tool calls already enqueued in its durable task store, not generate new model turns.
 
 Each project can store a small JSON memory file at .vibe/memory.json. This folder is hidden from normal project file listings and is not exposed to ordinary workspace read/write tools. The memory contains the goal, summary, stack, decisions, completed work, and next steps. Use workspace_read_memory and workspace_update_memory to maintain it across separate conversations and sessions on the same local workspace.
 

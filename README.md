@@ -90,11 +90,11 @@ See [docs/agent-tools-and-mcp.md](docs/agent-tools-and-mcp.md) for the setup and
 - Agent mode streams responses when the selected provider supports OpenAI-compatible SSE; regular chat remains non-streaming.
 - Provider support for tool calls and images varies. A non-vision model may reject image attachments.
 - Chat attachments do not yet support PDF, Word, audio, or video files.
-- Static projects can be previewed from `index.html`. The workspace can also start supported Vite, Next.js, FastAPI, and Flask development servers. Other runtimes are not automatically detected. The task loop runs in the browser tab; keep Vibe Calling open and the computer awake during long runs. A saved checkpoint can be resumed after interruption, but work does not continue as a hidden Windows background service after the app is closed.
-- Browser-testing skill guides testing, but this edition does not include a real browser automation engine or server-hosted computer use.
-- Remote Browser / Computer Use is a planned Beta panel only; no browser session is currently running on a server.
+- Static projects can be previewed from `index.html`. The workspace can also start supported Vite, Next.js, FastAPI, and Flask development servers. Other runtimes are not automatically detected.
 - Free-model discovery is conservative. Providers that do not disclose free pricing may return an empty model list rather than showing unverified paid models.
 - API provider feature support varies by model and account quota.
+- **Sandboxed terminal execution is disabled.** The current code does not establish a Windows AppContainer/restricted token or enforce filesystem/network isolation. The separate `workspace_run_command` tool is allowlisted and confirmation-gated, but it runs under the signed-in Windows user's normal permissions and is not a sandbox.
+- Computer use (pywinauto) requires the logged-in user's interactive desktop session; it does not support secure-desktop/UAC prompts or elevated applications unless specifically tested.
 
 ## Deployment editions
 
@@ -103,6 +103,17 @@ The default edition remains local-first. On Windows, extract the repository and 
 
 ### Free Hosted edition
 A separate private hosted launcher is provided in hosted_server.py. It is designed for Render Free plus Neon Free Postgres, with project files and imported skills persisted in the database. It does not replace or modify server.py or start.bat. Because free hosts sleep and have quota limits, the service is not always-on. Hosted project execution and preview are disabled until a properly isolated runtime is available. See HOSTING.md for free setup, quotas, limits, and security boundaries.
+
+### Windows Agent Runtime v2 (local Windows edition)
+The local edition includes a separate Windows worker process and local Browser/Computer adapters. The worker persists queued tasks and executes tool calls already stored in a task checkpoint. **It does not yet own the LLM conversation loop or generate further model turns by itself.** The interactive Agent model loop still runs in the browser tab; closing that tab pauses model-driven reasoning, even though a separately queued worker process can remain alive and finish the tool calls already placed in its queue.
+
+- **Windows Background Worker** — Python module `worker.worker`, launched in the signed-in user's interactive session. SQLite task queue (WAL), leases, checkpoints, recovery, stop/resume/cancel, event logs, and install/start/stop/uninstall scripts under `install/`. Startup and recovery still require a real Windows 10/11 smoke test.
+- **Local Browser Automation** — Playwright Chromium: tabs, navigation, DOM inspection, click/type/scroll, screenshots, and bounded upload/download. Uses a Vibe Calling profile by default; using a supplied profile is opt-in. Browser actions run on a dedicated adapter thread; file upload/download ask for confirmation.
+- **Local Computer Use** — pywinauto UI Automation: inspect windows/elements, click/type, screenshots, hotkeys, and emergency stop. Runs only in the signed-in interactive desktop session. Desktop click/type/hotkey actions ask for confirmation; secure desktop/UAC and elevated applications are not supported unless separately verified.
+- **Sandboxed terminal** — disabled in this build. The existing code does not yet enforce AppContainer/restricted-token, filesystem, or network isolation. Do not treat workspace path validation or process cleanup as a security boundary. The separate workspace command runner is allowlisted and asks for approval, but executes with the user's normal Windows permissions.
+- **Remote Browser / Computer Use** — still a planned Beta feature; no hosted remote-browser service is connected.
+
+The API exposes `/api/worker/execute` for local adapter actions and `/api/capabilities` for availability reporting. The Hosted edition remains separate and cannot invoke local worker or desktop/browser APIs.
 
 ## Project files
 
@@ -113,6 +124,10 @@ A separate private hosted launcher is provided in hosted_server.py. It is design
 - `skills/` — built-in agent skills.
 - `user_skills/` — imported personal skills (ignored by Git).
 - `projects/` — agent-created projects and chat uploads.
-- `tests/` — server safety and bundle consistency tests.
+- `tests/` — server safety, bundle consistency, worker recovery, sandbox security, and adapter integration tests.
+- `worker/` — background worker (task state machine, SQLite task store, execution loop).
+- `adapters/` — local Browser/Computer adapters and a disabled sandbox placeholder.
+- `api/` — worker/task management API bridging the worker to server.py and the UI.
+- `install/` — Windows installer and control scripts (install.bat, start-worker.bat, stop-worker.bat, uninstall.bat, requirements-windows.txt).
 
 License: MIT
