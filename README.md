@@ -90,11 +90,11 @@ See [docs/agent-tools-and-mcp.md](docs/agent-tools-and-mcp.md) for the setup and
 - Agent mode streams responses when the selected provider supports OpenAI-compatible SSE; regular chat remains non-streaming.
 - Provider support for tool calls and images varies. A non-vision model may reject image attachments.
 - Chat attachments do not yet support PDF, Word, audio, or video files.
-- Static projects can be previewed from `index.html`. The workspace can also start supported Vite, Next.js, FastAPI, and Flask development servers. Other runtimes are not automatically detected. The task loop runs in the browser tab; keep Vibe Calling open and the computer awake during long runs. A saved checkpoint can be resumed after interruption, but work does not continue as a hidden Windows background service after the app is closed.
-- Browser-testing skill guides testing, but this edition does not include a real browser automation engine or server-hosted computer use.
-- Remote Browser / Computer Use is a planned Beta panel only; no browser session is currently running on a server.
+- Static projects can be previewed from `index.html`. The workspace can also start supported Vite, Next.js, FastAPI, and Flask development servers. Other runtimes are not automatically detected.
 - Free-model discovery is conservative. Providers that do not disclose free pricing may return an empty model list rather than showing unverified paid models.
 - API provider feature support varies by model and account quota.
+- Sandbox per-process CPU and memory hard caps are not enforced through the pywin32 JobObject struct API on this build; time limits and process-tree cleanup (taskkill) are enforced.
+- Computer use (pywinauto) requires the logged-in user's interactive desktop session; it does not support secure-desktop/UAC prompts or elevated applications unless specifically tested.
 
 ## Deployment editions
 
@@ -103,6 +103,17 @@ The default edition remains local-first. On Windows, extract the repository and 
 
 ### Free Hosted edition
 A separate private hosted launcher is provided in hosted_server.py. It is designed for Render Free plus Neon Free Postgres, with project files and imported skills persisted in the database. It does not replace or modify server.py or start.bat. Because free hosts sleep and have quota limits, the service is not always-on. Hosted project execution and preview are disabled until a properly isolated runtime is available. See HOSTING.md for free setup, quotas, limits, and security boundaries.
+
+### Windows Agent Runtime v2 (local Windows edition)
+The local Windows edition now includes the Agent Runtime v2 background worker, so agent tasks continue after all browser tabs are closed and survive worker restarts / reboots:
+
+- **Windows Background Worker** — separate Python process started at user logon via Windows Task Scheduler; durable task queue in SQLite (WAL), automatic progress checkpoints (every 500 turns / 2,000 tool calls), crash & reboot recovery, stop/resume/cancel, clear event logs, install/start/stop/uninstall scripts under `install/`.
+- **Browser Automation** — Playwright (Chromium): tabs, navigate, read/inspect DOM, click/type/scroll, screenshots, bounded file upload/download, audit action log. Isolated persistent profile by default; downloads to a dedicated staging folder.
+- **Computer Use** — pywinauto (UI Automation + Win32): recognize open windows and UI elements, click/type/control real apps, screenshots, global emergency stop, user confirmation for sensitive operations. Runs only in the logged-in interactive session; no UAC/elevated-app support unless tested.
+- **Terminal** — Python/Node/PowerShell and other project commands run inside a genuine Windows-native sandbox (ACL workspace isolation, path/symlink/junction blocking, secret-path denial, process-tree cleanup via taskkill, time limits). No shell operators allowed; no silent fallback to unisolated host execution.
+- **Sandbox** — Windows-native isolation (not merely an allowlist): access outside the workspace and secret paths denied by ACL, network denied by default, child processes terminated at task end, CPU/memory/time limits enforced where the OS supports them.
+
+All capabilities are wired into the existing Agent Tool Calling set (`background_task_*`, `browser_*`, `computer_*`, `sandbox_*`), so the agent decides when to use each one. Per-tool status is exposed through `/api/capabilities` and shown in the UI. Existing chat, providers, skills, attachments, GitHub MCP, remote MCP, project workspace and UI are preserved unchanged. The Hosted edition remains strictly separate and cannot invoke any local worker or desktop/browser APIs.
 
 ## Project files
 
@@ -113,6 +124,10 @@ A separate private hosted launcher is provided in hosted_server.py. It is design
 - `skills/` — built-in agent skills.
 - `user_skills/` — imported personal skills (ignored by Git).
 - `projects/` — agent-created projects and chat uploads.
-- `tests/` — server safety and bundle consistency tests.
+- `tests/` — server safety, bundle consistency, worker recovery, sandbox security, and adapter integration tests.
+- `worker/` — background worker (task state machine, SQLite task store, execution loop).
+- `adapters/` — capability adapters (browser via Playwright, computer via pywinauto, sandboxed terminal).
+- `api/` — worker/task management API bridging the worker to server.py and the UI.
+- `install/` — Windows installer and control scripts (install.bat, start-worker.bat, stop-worker.bat, uninstall.bat, requirements-windows.txt).
 
 License: MIT
