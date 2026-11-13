@@ -34,6 +34,9 @@ import http.client
 from functools import wraps
 from urllib.parse import urlsplit
 
+# Windows Agent Runtime v2 — worker management API integration.
+from api import worker_api  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent
 WORKSPACE_ROOT = ROOT / "projects"
 if WORKSPACE_ROOT.is_symlink():
@@ -1328,6 +1331,29 @@ class Handler(SimpleHTTPRequestHandler):
         if request_path == "/projects" or request_path.startswith("/projects/"):
             self.send_json(404, {"error": "Project files are served only from their isolated preview origin."})
             return
+        # Windows Agent Runtime v2 — worker/task management GET endpoints.
+        if request_path == "/api/worker/status":
+            self.send_json(200, worker_api.worker_status({}))
+            return
+        if request_path == "/api/capabilities":
+            self.send_json(200, worker_api.capabilities({}))
+            return
+        if request_path == "/api/tasks/list":
+            qs = parse_qs(urlsplit(self.path).query)
+            state = qs.get("state", [None])[0]
+            conversation_id = qs.get("conversation_id", [None])[0]
+            workspace_id = qs.get("workspace_id", [None])[0]
+            limit = int(qs.get("limit", ["50"])[0])
+            self.send_json(200, worker_api.list_tasks({
+                "state": state, "conversation_id": conversation_id,
+                "workspace_id": workspace_id, "limit": limit,
+            }))
+            return
+        if request_path == "/api/tasks/get":
+            qs = parse_qs(urlsplit(self.path).query)
+            task_id = qs.get("task_id", [None])[0]
+            self.send_json(200, worker_api.get_task({"task_id": task_id}))
+            return
         if request_path not in {"", "/", "/index.html", "/styles.css", "/app.js"}:
             self.send_json(404, {"error": "File not found."})
             return
@@ -1335,7 +1361,10 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = urlsplit(self.path).path
-        if route not in {"/api/proxy", "/api/workspace", "/api/skills", "/api/mcp/github", "/api/mcp/remote", "/api/research"}:
+        if route not in {"/api/proxy", "/api/workspace", "/api/skills", "/api/mcp/github", "/api/mcp/remote", "/api/research",
+                         "/api/worker/start", "/api/worker/stop", "/api/worker/status",
+                         "/api/tasks/create", "/api/tasks/list", "/api/tasks/get",
+                         "/api/tasks/transition", "/api/tasks/approve", "/api/capabilities"}:
             self.send_json(404, {"error": "Unknown local API route."})
             return
         host_header = (self.headers.get("Host") or "").lower()
@@ -1370,6 +1399,26 @@ class Handler(SimpleHTTPRequestHandler):
                 self.handle_github_mcp(payload)
             elif route == "/api/mcp/remote":
                 self.handle_remote_mcp(payload)
+            elif route == "/api/worker/start":
+                self.send_json(200, worker_api.start_worker(payload))
+            elif route == "/api/worker/stop":
+                self.send_json(200, worker_api.stop_worker(payload))
+            elif route == "/api/worker/status":
+                self.send_json(200, worker_api.worker_status(payload))
+            elif route == "/api/tasks/create":
+                self.send_json(200, worker_api.create_task(payload))
+            elif route == "/api/tasks/list":
+                self.send_json(200, worker_api.list_tasks(payload))
+            elif route == "/api/tasks/get":
+                self.send_json(200, worker_api.get_task(payload))
+            elif route == "/api/tasks/transition":
+                self.send_json(200, worker_api.transition_task(payload))
+            elif route == "/api/tasks/approve":
+                self.send_json(200, worker_api.approve_tool(payload))
+            elif route == "/api/capabilities":
+                self.send_json(200, worker_api.capabilities(payload))
+            elif route == "/api/worker/execute":
+                self.send_json(200, worker_api.execute_adapter(payload))
             else:
                 self.handle_research(payload)
         except (UnicodeDecodeError, json.JSONDecodeError):
