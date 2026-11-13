@@ -4,10 +4,10 @@ import time
 import unittest
 from pathlib import Path
 
-from adapters.browser import BrowserAdapter
+from adapters.browser import BrowserAdapter, _PLAYWRIGHT_AVAILABLE
 
 
-@unittest.skipIf(os.name != "nt", "Browser integration test targets Windows runtime")
+@unittest.skipIf(os.name != "nt" or not _PLAYWRIGHT_AVAILABLE, "Browser integration requires Windows and Playwright")
 class BrowserIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.adapter = BrowserAdapter()
