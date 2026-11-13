@@ -1,16 +1,14 @@
 @echo off
 setlocal
 cd /d "%~dp0.."
+set "QUIET="
+if /i "%~1"=="-quiet" set "QUIET=-Quiet"
 
-echo Starting Vibe Calling background worker...
-where py >nul 2>nul
-if %errorlevel%==0 (
-  set PY=py -3
-) else (
-  set PY=python
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-worker.ps1" -AppDir "%CD%" %QUIET%
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" (
+  echo ERROR: Vibe Calling Agent Worker did not start. Exit code: %RC%
+  echo Check "%LOCALAPPDATA%\Vibe Calling\logs\worker-stderr.log".
+  if not defined QUIET pause
 )
-
-:: Run the worker as a detached process (no console window).
-start "Vibe Calling Worker" /b %PY% worker.py --db "%LOCALAPPDATA%\Vibe Calling\agent-tasks.db" --worker-id "worker-%RANDOM%%RANDOM%"
-echo Worker started. Logs: %LOCALAPPDATA%\Vibe Calling\logs\worker.log
-endlocal
+endlocal & exit /b %RC%

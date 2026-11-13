@@ -1,25 +1,10 @@
-"""Windows-native sandbox adapter for the Windows Agent Runtime v2.
+"""Disabled sandbox placeholder for the Windows Agent Runtime v2.
 
-Provides genuine OS-enforced isolation (not merely a command allowlist) for
-running Python/Node/PowerShell and other project tools. Enforcement is built
-on Windows primitives that are reliable on every Windows build:
-
-- Filesystem ACLs: the registered workspace folder is the only writable
-  location; system folders and secret paths are denied by ACL, not convention.
-- Path security: traversal, symlinks, junctions, absolute paths and secret
-  paths are rejected before any process starts.
-- Process-tree cleanup: every sandboxed process is started in its own process
-  group and terminated with `taskkill /T /F /PID` when the command finishes or
-  times out, so no child processes escape.
-- Time limits: enforced by a polling loop; overdue processes are killed.
-- No silent fallback: if OS-level enforcement cannot be established, execution
-  is refused with a clearly-labeled error. It never degrades to running as the
-  normal user outside isolation.
-
-Note: per-process CPU and memory hard caps are not implemented through the
-fragile pywin32 JobObject struct API on this build. Time limits and process
-tree cleanup are the enforced guarantees. The status report reflects what is
-actually enforced.
+The earlier implementation performed workspace path checks and process
+cleanup, but ran child commands with the ordinary Windows user token. It did
+not enforce a process/filesystem boundary or network isolation. This module
+therefore refuses all command execution until a real AppContainer or
+restricted-token implementation passes security tests.
 """
 
 from __future__ import annotations
@@ -52,8 +37,13 @@ class SandboxSecurityError(RuntimeError):
 
 
 class SandboxAdapter:
-    """Runs commands inside a Windows sandbox with ACL isolation and process
-    tree cleanup."""
+    """Placeholder for a future OS-isolated command runtime.
+
+    The current implementation has path-validation and process-cleanup code,
+    but it does not create an AppContainer/restricted token or enforce a
+    network boundary for child processes. Running commands under the normal
+    user's token is not a sandbox, so execution is intentionally disabled.
+    """
 
     name = "sandbox"
 
@@ -74,32 +64,32 @@ class SandboxAdapter:
     # Capability detection
     # ------------------------------------------------------------------ #
     def is_available(self) -> bool:
-        return _WIN32_API and self._sandbox_available
+        # Do not expose this adapter as available until actual OS-enforced
+        # filesystem, process and network isolation has been implemented and
+        # verified on Windows.
+        return False
 
     def status(self) -> Dict[str, Any]:
         return {
             "adapter": self.name,
-            "available": self.is_available(),
+            "available": False,
+            "reason": (
+                "Disabled: this build does not enforce an AppContainer or "
+                "restricted process token, filesystem isolation, or network isolation."
+            ),
             "win32_api": _WIN32_API,
             "os": os.name,
             "workspaces": list(self._workspaces.keys()),
             "default_workspace": str(self._default_workspace) if self._default_workspace else None,
-            "deny_network": self._deny_network,
-            "network_allowlist": self._network_allowlist,
             "enforced": {
-                "workspace_acl": True,
-                "path_traversal_blocked": True,
-                "symlink_junction_blocked": True,
-                "secret_paths_blocked": True,
-                "process_tree_cleanup": True,
-                "time_limit_sec": True,
+                "os_filesystem_isolation": False,
+                "network_isolation": False,
+                "restricted_process_token": False,
+                "path_validation_only": True,
+                "process_tree_cleanup_code_present": True,
+                "time_limit_code_present": True,
                 "cpu_hard_cap": False,
                 "memory_hard_cap": False,
-            },
-            "limits": {
-                "cpu_rate_percent": self._cpu_rate,
-                "memory_limit_mb": self._memory_limit_mb,
-                "time_limit_sec": self._time_limit_sec,
             },
         }
 
@@ -116,45 +106,12 @@ class SandboxAdapter:
         deny_network: bool = True,
         network_allowlist: Optional[List[str]] = None,
     ) -> None:
-        if not _WIN32_API:
-            raise RuntimeError("Windows API (pywin32) is required for sandboxing.")
-        if self._initialized:
-            return
-
-        if cpu_rate_percent is not None and not 1 <= cpu_rate_percent <= 100:
-            raise ValueError("cpu_rate_percent must be between 1 and 100.")
-        if memory_limit_mb is not None and memory_limit_mb < 1:
-            raise ValueError("memory_limit_mb must be at least 1.")
-        if time_limit_sec is not None and time_limit_sec < 1:
-            raise ValueError("time_limit_sec must be at least 1.")
-
-        self._cpu_rate = cpu_rate_percent
-        self._memory_limit_mb = memory_limit_mb
-        self._time_limit_sec = time_limit_sec
-        self._deny_network = deny_network
-        self._network_allowlist = list(network_allowlist or [])
-
-        if workspace_dir:
-            ws = Path(workspace_dir).resolve()
-        else:
-            base = os.environ.get("LOCALAPPDATA") or str(Path.cwd())
-            ws = Path(base) / "Vibe Calling" / "sandbox_workspace"
-        ws.mkdir(parents=True, exist_ok=True)
-
-        self._apply_workspace_acl(ws)
-        self._workspaces["default"] = ws
-        self._default_workspace = ws
-
-        # Verify taskkill exists for process-tree cleanup.
-        if not shutil.which("taskkill"):
-            self._sandbox_available = False
-            self._initialized = True
-            raise SandboxSecurityError(
-                "taskkill.exe is not available; cannot guarantee process-tree cleanup."
-            )
-
-        self._sandbox_available = True
-        self._initialized = True
+        raise SandboxSecurityError(
+            "Sandbox execution is disabled. This build does not yet enforce "
+            "Windows AppContainer/restricted-token, filesystem, and network isolation. "
+            "Use the separately approval-gated workspace command runner only for "
+            "commands you explicitly trust."
+        )
 
     def _apply_workspace_acl(self, path: Path) -> None:
         try:
@@ -174,13 +131,9 @@ class SandboxAdapter:
             pass
 
     def register_workspace(self, workspace_id: str, path: str) -> None:
-        ws = Path(path).resolve()
-        ws.mkdir(parents=True, exist_ok=True)
-        self._apply_workspace_acl(ws)
-        with self._lock:
-            self._workspaces[workspace_id] = ws
-            if self._default_workspace is None:
-                self._default_workspace = ws
+        raise SandboxSecurityError(
+            "Sandbox workspace registration is disabled until OS-enforced isolation is implemented."
+        )
 
     def _resolve_workspace(self, workspace_id: Optional[str]) -> Path:
         if workspace_id and workspace_id in self._workspaces:

@@ -1363,6 +1363,7 @@ class Handler(SimpleHTTPRequestHandler):
         route = urlsplit(self.path).path
         if route not in {"/api/proxy", "/api/workspace", "/api/skills", "/api/mcp/github", "/api/mcp/remote", "/api/research",
                          "/api/worker/start", "/api/worker/stop", "/api/worker/status",
+                         "/api/worker/execute",
                          "/api/tasks/create", "/api/tasks/list", "/api/tasks/get",
                          "/api/tasks/transition", "/api/tasks/approve", "/api/capabilities"}:
             self.send_json(404, {"error": "Unknown local API route."})

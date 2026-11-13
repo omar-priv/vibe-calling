@@ -1,14 +1,15 @@
 """Vibe Calling Windows Agent Runtime v2 — background worker process.
 
 Runs independently of the browser UI. Owns the durable task state machine,
-polls the shared SQLite task store for queued work, executes tasks through
-registered adapters (browser, computer, terminal, sandbox), and persists
-checkpoints before/after every side-effecting action so a crash or reboot
-never loses progress or repeats a destructive operation.
+polls the shared SQLite task store for queued work, and executes tool calls
+already persisted in a task checkpoint through the available Browser/Computer
+adapters. It stores tool-call records and checkpoints for recovery, but does
+not call the model or generate further LLM turns. The sandbox adapter is
+disabled until real OS-enforced isolation is implemented.
 
-The worker is started by start.bat (or install scripts) and supervised by
-Windows Task Scheduler at user logon. It binds only to 127.0.0.1 for its
-control API and never exposes anything to the public network.
+The worker is started by start.bat or supervised by Windows Task Scheduler in
+the signed-in user's interactive session. The local HTTP API belongs to
+server.py, not to this worker process.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import signal
 import sys
 import threading
@@ -58,18 +60,28 @@ logger.addHandler(_console_handler)
 # Redact secrets from any log line that accidentally contains them.
 SECRET_KEYS = {
     "api_key", "apikey", "authorization", "bearer", "token",
-    "password", "secret", "cookie", "pat", "session_id",
+    "access_token", "refresh_token", "password", "secret", "client_secret",
+    "cookie", "set_cookie", "pat", "session_id", "private_key",
 }
+
+_BEARER_SECRET_PATTERN = re.compile(r"(?i)\bBearer\s+[^\s,;]+")
+_ASSIGNED_SECRET_PATTERN = re.compile(
+    r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|password)\s*[:=]\s*[^\s,;]+"
+)
 
 
 def _redact(obj: Any) -> Any:
     if isinstance(obj, dict):
-        return {k: _redact(v) for k, v in obj.items()
-                if k.lower() not in SECRET_KEYS or (k, "***REDACTED***")}
+        sanitized = {}
+        for key, value in obj.items():
+            normalized_key = str(key).casefold().replace("-", "_")
+            sanitized[key] = "***REDACTED***" if normalized_key in SECRET_KEYS else _redact(value)
+        return sanitized
     if isinstance(obj, list):
         return [_redact(v) for v in obj]
     if isinstance(obj, str):
-        return obj
+        sanitized = _BEARER_SECRET_PATTERN.sub("Bearer ***REDACTED***", obj)
+        return _ASSIGNED_SECRET_PATTERN.sub(r"\1=***REDACTED***", sanitized)
     return obj
 
 
@@ -668,11 +680,19 @@ class Worker:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Vibe Calling Windows Agent Runtime v2 worker")
     parser.add_argument("--db", type=Path, default=None, help="Path to SQLite task database")
+    parser.add_argument("--pid-file", type=Path, default=None, help="Optional file used by the Windows launcher to track this worker")
     parser.add_argument("--worker-id", type=str, default=None, help="Unique worker identifier")
     parser.add_argument("--poll-interval", type=float, default=2.0, help="Seconds between task polls")
     parser.add_argument("--lease-seconds", type=int, default=30, help="Worker lease duration in seconds")
     parser.add_argument("--once", action="store_true", help="Execute one task then exit (for testing)")
     args = parser.parse_args()
+
+    pid_file = args.pid_file
+    if pid_file is not None and not args.once:
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+        temporary_pid_file = pid_file.with_suffix(pid_file.suffix + ".tmp")
+        temporary_pid_file.write_text(str(os.getpid()), encoding="ascii")
+        temporary_pid_file.replace(pid_file)
 
     stop_event = threading.Event()
 
@@ -710,6 +730,12 @@ def main() -> int:
         pass
     finally:
         worker.stop()
+        if pid_file is not None:
+            try:
+                if pid_file.is_file() and pid_file.read_text(encoding="ascii").strip() == str(os.getpid()):
+                    pid_file.unlink()
+            except OSError:
+                pass
     return 0
 
 

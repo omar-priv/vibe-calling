@@ -100,21 +100,22 @@ States: queued, running, waiting_for_approval, paused, completed, failed, cancel
 9. Verify hosted workflow/deployment and ensure hosted_server.py has no import or execution path into Windows-only modules.
 10. Publish a versioned ZIP/installer and GitHub Release only after all checks pass.
 
-## Current implementation status (implemented & tested)
+## Current implementation status (code present; Windows validation still pending)
 
 | Capability | Module | Status |
 |------------|--------|--------|
 | Task state machine | `worker/task_state.py` | ✅ Implemented (queued/running/waiting_for_approval/paused/completed/failed/cancelled/interrupted) |
 | Durable SQLite task store (WAL, migrations, transactional claim, lease, orphan recovery, idempotent tool calls, event log) | `worker/task_store.py` | ✅ Implemented |
-| Background worker (claim loop, lease renewal, crash/reboot recovery, automatic checkpoints) | `worker/worker.py` | ✅ Implemented + `--once` test mode |
-| Browser automation (Playwright: tabs, navigate, read/inspect, click/type/scroll, screenshot, upload/download, action log) | `adapters/browser.py` | ✅ Implemented + integration tests |
-| Computer use (pywinauto UIA: windows, elements, click/type, screenshot, hotkey, emergency stop, action log) | `adapters/computer.py` | ✅ Implemented (interactive session only) |
-| Sandboxed terminal (Windows ACL workspace isolation, path security, process-tree cleanup via taskkill, time limits) | `adapters/sandbox.py` | ✅ Implemented + security tests |
-| Worker/task management API | `api/worker_api.py` + routes in `server.py` | ✅ Implemented (/api/worker/*, /api/tasks/*, /api/capabilities, /api/worker/execute) |
-| Agent tool calling integration | `app.js` (~50 new tools + runTool handlers + workerRequest) | ✅ Implemented |
-| Windows launcher (starts worker detached + server) | `start.bat` | ✅ Updated |
-| Installer/control scripts | `install/` (install.bat, start-worker.bat, stop-worker.bat, uninstall.bat, requirements-windows.txt) | ✅ Created |
-| Unit + integration + sandbox security + worker recovery tests | `tests/` | ✅ 113 tests pass (2 skips: headless sandbox sleep, interactive-session Notepad) |
+| Background worker (claim loop, lease renewal, crash/reboot recovery, automatic checkpoints) | `worker/worker.py` | Code present; launcher now targets `python -m worker.worker`; Windows lifecycle not yet smoke-tested |
+| Browser automation (Playwright: tabs, navigate, read/inspect, click/type/scroll, screenshot, upload/download, action log) | `adapters/browser.py` | Code present; persistent-profile launch and API thread-affinity fixes added; Windows browser tests still required |
+| Computer use (pywinauto UIA: windows, elements, click/type, screenshot, hotkey, emergency stop, action log) | `adapters/computer.py` | Code present; interactive-session-only; Windows desktop tests still required |
+| Sandboxed terminal | `adapters/sandbox.py` | **Disabled** until real AppContainer/restricted-token, filesystem and network isolation can be implemented and verified |
+| Worker/task management API | `api/worker_api.py` + routes in `server.py` | API route and single-thread adapter host implemented; Windows end-to-end test still required |
+| Agent tool calling integration | `app.js` | Local Browser/Computer actions connected; sensitive desktop actions and browser file transfers ask for confirmation |
+| Windows launcher | `start.bat`, `install/start-worker.ps1` | Fixed to launch the actual `worker.worker` module; Windows execution not testable in this environment |
+| Installer/control scripts | `install/` | Task Scheduler registration now uses the signed-in interactive user; Windows execution not testable in this environment |
+| Background model loop | `worker/worker.py`, `app.js` | **Not implemented**: worker executes pre-queued tool calls; it does not make new LLM requests or continue autonomous reasoning after the browser tab closes |
+| Tests | `tests/` | Run this audit's result before release; Windows-only tests are skipped on non-Windows hosts |
 
 Remaining before release:
 - Real Windows 10/11 smoke test on a non-CI machine.

@@ -1,8 +1,6 @@
 @echo off
 setlocal
-echo Stopping Vibe Calling background worker...
-taskkill /IM python.exe /F >nul 2>&1
-taskkill /IM py.exe /F >nul 2>&1
-echo Worker processes stopped.
-echo NOTE: This also stops any co-running python/py processes.
-endlocal
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0stop-worker.ps1"
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" echo Could not safely stop the Vibe Calling worker. Exit code: %RC%
+endlocal & exit /b %RC%

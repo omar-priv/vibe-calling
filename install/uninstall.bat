@@ -2,6 +2,9 @@
 setlocal
 echo Uninstalling Vibe Calling Windows Agent Runtime v2...
 
+:: Stop the exact worker process before deleting its scheduled task.
+call "%~dp0stop-worker.bat"
+
 :: Remove Task Scheduler task
 schtasks /delete /tn "Vibe Calling Agent Worker" /f >nul 2>&1
 if %errorlevel%==0 (

@@ -16,19 +16,19 @@ if %errorlevel%==0 (
 )
 
 :: ------------------------------------------------------------------
-:: 1. Start the background worker (independent of the browser UI).
-::    It runs as a detached process so agent tasks continue after
-::    all browser tabs are closed. It owns the durable SQLite task
-::    store and executes browser / computer / sandbox tool calls.
+:: 1. Start the separate worker in the logged-in user's session.
+::    The helper resolves the actual Python executable and starts
+::    worker.worker as a hidden process. It also prevents duplicate
+::    launches and writes logs/PID under LOCALAPPDATA.
 :: ------------------------------------------------------------------
 echo Starting background agent worker...
-%PY% worker.py --db "%LOCALAPPDATA%\Vibe Calling\agent-tasks.db" --worker-id "worker-%RANDOM%%RANDOM%" > worker-stdout.log 2> worker-stderr.log &
-if %errorlevel%==0 (
-  echo   Worker started (PID %ERRORLEVEL%). Logs: worker-stdout.log / worker-stderr.log
+call "%~dp0install\start-worker.bat" -quiet
+if errorlevel 1 (
+  echo   WARNING: The background worker could not be started.
+  echo   Check %LOCALAPPDATA%\Vibe Calling\logs\worker-stderr.log
 ) else (
-  echo   WARNING: Worker could not start. Tasks will not run in the background.
+  echo   Background worker launch checked. Logs: %LOCALAPPDATA%\Vibe Calling\logs\worker.log
 )
-timeout /t 2 >nul
 
 :: ------------------------------------------------------------------
 :: 2. Start the local web server (127.0.0.1 only).

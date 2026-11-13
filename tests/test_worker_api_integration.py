@@ -37,6 +37,7 @@ class WorkerApiIntegrationTests(unittest.TestCase):
         server.PORT = 0
         _httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
         _PORT = _httpd.server_address[1]
+        server.PORT = _PORT
         cls._thread = threading.Thread(target=_httpd.serve_forever, daemon=True)
         cls._thread.start()
         time.sleep(0.5)
@@ -128,6 +129,60 @@ class WorkerApiIntegrationTests(unittest.TestCase):
         })
         self.assertTrue(cancelled["ok"], cancelled)
         self.assertEqual(cancelled["state"], "cancelled")
+
+    def test_worker_execute_route_is_exposed(self):
+        # Browser/Computer requests are routed through /api/worker/execute.
+        # This route must pass the Handler allowlist even on hosts where the
+        # optional Windows automation dependencies are not installed.
+        result = _post("/api/worker/execute", {
+            "action": "computer_action_log",
+            "limit": 1,
+        })
+        self.assertIn("ok", result)
+        self.assertNotIn("Unknown local API route", result.get("error", ""))
+        self.assertNotIn("adapter and tool_name are required", result.get("error", ""))
+
+
+    def test_execute_adapter_accepts_frontend_action_payload(self):
+        from unittest.mock import patch
+
+        captured = {}
+
+        class FakeAdapter:
+            def is_available(self):
+                return True
+
+            def execute(self, task, tool_name, args):
+                captured["tool_name"] = tool_name
+                captured["args"] = args
+                return type("Result", (), {
+                    "ok": True, "output": "navigated", "error": None,
+                    "should_stop": False, "needs_approval": False,
+                    "approval_prompt": None,
+                })()
+
+        with patch.object(worker_api, "_api_adapters", {"browser": FakeAdapter()}):
+            result = worker_api.execute_adapter({
+                "action": "browser_navigate",
+                "url": "https://example.com",
+                "wait_until": "domcontentloaded",
+            })
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(captured["tool_name"], "browser_navigate")
+        self.assertEqual(captured["args"], {
+            "url": "https://example.com",
+            "wait_until": "domcontentloaded",
+        })
+
+    def test_execute_adapter_rejects_mismatched_adapter_and_action(self):
+        result = worker_api.execute_adapter({
+            "adapter": "browser",
+            "tool_name": "computer_click",
+            "args": {},
+        })
+        self.assertFalse(result["ok"])
+        self.assertIn("matching tool action", result["error"])
 
     def test_execute_sandbox_adapter_via_api(self):
         if not self.__class__.SANDBOX_READY:

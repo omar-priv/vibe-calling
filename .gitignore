@@ -34,3 +34,6 @@ browser_profile/
 browser_staging/
 computer_screenshots/
 sandbox_workspace/
+
+# Runtime task database must never ship with source/release archives.
+Vibe Calling/agent-tasks.db*

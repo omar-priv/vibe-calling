@@ -12,6 +12,7 @@ import os
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -28,6 +29,36 @@ _worker: Optional[Worker] = None
 _worker_lock = threading.RLock()
 _store: Optional[TaskStore] = None
 _store_lock = threading.RLock()
+_adapter_executor: Optional[ThreadPoolExecutor] = None
+_adapter_executor_lock = threading.RLock()
+_api_adapters: Optional[Dict[str, Any]] = None
+
+
+def _run_on_adapter_thread(function):
+    """Run browser/computer adapter work on one stable thread.
+
+    Playwright's synchronous API is thread-affine. The HTTP server is
+    ThreadingHTTPServer, so executing each browser action directly in its
+    request thread can initialize Chromium on one thread and use it from
+    another. A single-thread executor keeps each adapter's lifecycle and
+    subsequent actions on the same OS thread.
+    """
+    global _adapter_executor
+    with _adapter_executor_lock:
+        if _adapter_executor is None:
+            _adapter_executor = ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="vibe-adapter-host"
+            )
+        executor = _adapter_executor
+    return executor.submit(function).result()
+
+
+def _get_api_adapters() -> Dict[str, Any]:
+    global _api_adapters
+    if _api_adapters is None:
+        _api_adapters = _load_adapters()
+    return _api_adapters
+
 
 
 def _get_store() -> TaskStore:
@@ -278,55 +309,82 @@ def capabilities(args: Dict[str, Any]) -> Dict[str, Any]:
     initialization state is reflected), otherwise loads fresh instances for a
     read-only availability probe.
     """
-    worker = _get_worker()
-    if worker is not None and worker.adapters is not None:
-        adapters = worker.adapters
-    else:
-        adapters = _load_adapters()
-    result = {}
-    for name, adapter in adapters.items():
-        try:
-            result[name] = adapter.status()
-        except Exception as exc:
-            result[name] = {"adapter": name, "available": False, "error": str(exc)}
-    return {"ok": True, "adapters": result}
+    def collect():
+        adapters = _get_api_adapters()
+        result = {}
+        for name, adapter in adapters.items():
+            try:
+                result[name] = adapter.status()
+            except Exception as exc:
+                result[name] = {"adapter": name, "available": False, "error": str(exc)}
+        return {"ok": True, "adapters": result}
+
+    return _run_on_adapter_thread(collect)
 
 
 def execute_adapter(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Execute one adapter action against the running worker's adapters.
+    """Execute one Browser/Computer/Sandbox adapter action in this API process.
 
-    Payload: {adapter: "browser|computer|sandbox", tool_name: "browser_click", args: {...}}
-    Returns the AdapterResult as a dict.
+    Accepts the UI payload {action: "browser_click", ...} and the durable
+    worker payload {adapter, tool_name, args}. Returns an AdapterResult dict.
     """
-    worker = _get_worker()
-    if worker is None:
-        return {"ok": False, "error": "Background worker is not running. Start it first."}
+    # The browser UI sends the compact shape {action: "browser_*", ...}
+    # while queued worker tasks use {adapter, tool_name, args}. Accept both
+    # contracts, and derive the adapter only from a known tool-name prefix.
+    action = args.get("action")
     adapter_name = args.get("adapter")
-    tool_name = args.get("tool_name")
-    adapter_args = args.get("args") or {}
-    if not adapter_name or not tool_name:
-        return {"ok": False, "error": "adapter and tool_name are required."}
-    adapter = (worker.adapters or {}).get(adapter_name)
-    if adapter is None:
-        return {"ok": False, "error": f"Adapter '{adapter_name}' is not loaded."}
-    if not adapter.is_available():
-        return {"ok": False, "error": f"Adapter '{adapter_name}' is not available."}
-    # Build a minimal task record for context.
-    task = TaskRecord(
-        task_id=adapter_args.get("_task_id") or f"ui-{uuid.uuid4().hex[:8]}",
-        conversation_id=adapter_args.get("_conversation_id") or "ui",
-        workspace_id=adapter_args.get("_workspace_id"),
-        title="UI-triggered adapter action",
-    )
-    try:
-        result = adapter.execute(task, tool_name, adapter_args)
-        return {
-            "ok": result.ok,
-            "output": result.output,
-            "error": result.error,
-            "should_stop": result.should_stop,
-            "needs_approval": result.needs_approval,
-            "approval_prompt": result.approval_prompt,
+    tool_name = args.get("tool_name") or action
+    nested_args = args.get("args")
+    if isinstance(nested_args, dict):
+        adapter_args = nested_args
+    else:
+        adapter_args = {
+            key: value for key, value in args.items()
+            if key not in {"action", "adapter", "tool_name", "args"}
         }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+
+    if action and not adapter_name:
+        if action.startswith("browser_"):
+            adapter_name = "browser"
+        elif action.startswith("computer_"):
+            adapter_name = "computer"
+        elif action.startswith("sandbox_") or action.startswith("terminal_"):
+            adapter_name = "sandbox"
+
+    expected_prefix = {
+        "browser": "browser_",
+        "computer": "computer_",
+        "sandbox": "sandbox_",
+    }.get(adapter_name)
+    if not adapter_name or not tool_name or not expected_prefix or not tool_name.startswith(expected_prefix):
+        return {"ok": False, "error": "A valid adapter and matching tool action are required."}
+
+    def execute():
+        adapter = _get_api_adapters().get(adapter_name)
+        if adapter is None:
+            return {"ok": False, "error": f"Adapter '{adapter_name}' is not loaded."}
+        if not adapter.is_available():
+            return {"ok": False, "error": f"Adapter '{adapter_name}' is not available."}
+        # Build a minimal task record for context. Adapter instances are
+        # private to this stable executor thread and do not depend on the
+        # queued-task worker being alive.
+        task = TaskRecord(
+            task_id=adapter_args.get("_task_id") or f"ui-{uuid.uuid4().hex[:8]}",
+            conversation_id=adapter_args.get("_conversation_id") or "ui",
+            workspace_id=adapter_args.get("_workspace_id"),
+            title="UI-triggered adapter action",
+        )
+        try:
+            result = adapter.execute(task, tool_name, adapter_args)
+            return {
+                "ok": result.ok,
+                "output": result.output,
+                "error": result.error,
+                "should_stop": result.should_stop,
+                "needs_approval": result.needs_approval,
+                "approval_prompt": result.approval_prompt,
+            }
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    return _run_on_adapter_thread(execute)

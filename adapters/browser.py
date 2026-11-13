@@ -61,7 +61,7 @@ class BrowserAdapter:
         return {
             "adapter": self.name,
             "available": self.is_available(),
-            "running": self._browser is not None,
+            "running": self._context is not None,
             "tabs": len(self._tabs),
             "active_tab": self._active_tab_id,
             "headless": self._headless,
@@ -101,12 +101,19 @@ class BrowserAdapter:
             self._profile_dir = Path(base) / "Vibe Calling" / "browser_profile"
         self._profile_dir.mkdir(parents=True, exist_ok=True)
 
-        launch_options: Dict[str, Any] = {"headless": headless}
         if use_user_profile:
-            launch_options["user_data_dir"] = str(self._profile_dir)
-
-        self._browser = self._playwright.chromium.launch(**launch_options)
-        self._context = self._browser.new_context(accept_downloads=True)
+            # user_data_dir is accepted by launch_persistent_context(), not
+            # chromium.launch(). Passing it to launch() raises an unknown
+            # option error, so explicit user-profile opt-in never worked.
+            self._context = self._playwright.chromium.launch_persistent_context(
+                user_data_dir=str(self._profile_dir),
+                headless=headless,
+                accept_downloads=True,
+            )
+            self._browser = self._context.browser
+        else:
+            self._browser = self._playwright.chromium.launch(headless=headless)
+            self._context = self._browser.new_context(accept_downloads=True)
         self._context.set_default_timeout(30000)
         self._page = self._context.new_page()
         tab_id = str(uuid.uuid4())
@@ -117,6 +124,11 @@ class BrowserAdapter:
 
     def shutdown(self) -> None:
         with self._lock:
+            try:
+                if self._context is not None:
+                    self._context.close()
+            except Exception:
+                pass
             try:
                 if self._browser is not None:
                     self._browser.close()

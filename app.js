@@ -327,8 +327,8 @@ const tools=[
  toolDef("computer_emergency_stop","Activate or release the global emergency stop that halts all computer actions.",{activate:{type:"boolean"}}),
  toolDef("computer_action_log","Return the computer-use action log (audit trail).",{limit:{type:"number"}}),
  /* ---------------- Sandboxed terminal (Windows Job Objects + ACLs) ---------------- */
- toolDef("sandbox_command","Run a command (python, node, pwsh, or a workspace script) inside an OS-enforced sandbox with CPU/memory/time limits and process-tree cleanup. No shell operators allowed.",{command:{type:"string"},workspace:{type:"string"},cwd:{type:"string"},timeout_sec:{type:"number"},env:{type:"object"}},["command"]),
- toolDef("sandbox_status","Return the sandbox status: availability, active jobs, resource limits, network policy.",{}),
+ toolDef("sandbox_command","DISABLED: this release does not enforce Windows AppContainer/restricted-token, filesystem, or network isolation. Do not execute commands through this tool. Use the separate user-approved workspace command runner only for trusted project commands.",{command:{type:"string"},workspace:{type:"string"},cwd:{type:"string"},timeout_sec:{type:"number"},env:{type:"object"}},["command"]),
+ toolDef("sandbox_status","Return whether a genuinely OS-isolated sandbox is available. Command execution is disabled until Windows isolation is implemented and verified.",{}),
 ];
 const researchTools=[
  toolDef("web_search","Search the public web for current information. For latest news choose a recent time_range. Returns source titles, secure URLs, and snippets.",{query:{type:"string"},max_results:{type:"integer",minimum:1,maximum:8},time_range:{type:"string",enum:["any","day","week","month","year"]}},["query"]),
@@ -837,11 +837,13 @@ async function runTool(name,a){
     return data.output;
   }
   if(name==="browser_upload_file"){
+    if(!confirm("The agent wants to upload a local file to the current website:\n\n"+a.file_path+"\n\nOnly approve if you trust the destination. Continue?"))return "User declined the browser file upload.";
     const data=await workerRequest({action:"browser_upload_file",selector:a.selector,file_path:a.file_path,tab_id:a.tab_id});
     if(!data.ok)throw Error(data.error||"Failed to upload file.");
     return data.output;
   }
   if(name==="browser_download_file"){
+    if(!confirm("The agent wants to download a file from:\n\n"+(a.url||("current page selector: "+(a.selector||"(unspecified)")))+"\n\nContinue?"))return "User declined the browser download.";
     const data=await workerRequest({action:"browser_download_file",url:a.url,selector:a.selector,tab_id:a.tab_id});
     if(!data.ok)throw Error(data.error||"Failed to download file.");
     return data.output;
@@ -873,6 +875,7 @@ async function runTool(name,a){
     return data.output;
   }
   if(name==="computer_click"){
+    if(!confirm("The agent wants to click a control on your Windows desktop.\n\nTarget: "+JSON.stringify(a)+"\n\nThis can submit forms or change data in another app. Allow this action?"))return "User declined the computer click.";
     const data=await workerRequest({action:"computer_click",...a});
     if(!data.ok){
       if(data.error&&data.error.includes("Refused to click"))throw Error(data.error);
@@ -881,6 +884,7 @@ async function runTool(name,a){
     return data.output;
   }
   if(name==="computer_type"){
+    if(!confirm("The agent wants to type into your Windows desktop.\n\nText preview: "+String(a.text||"").slice(0,120)+"\n\nThis may enter data into the active application. Allow this action?"))return "User declined desktop typing.";
     const data=await workerRequest({action:"computer_type",text:a.text,title:a.title,press_enter:!!a.press_enter});
     if(!data.ok)throw Error(data.error||"Failed to type.");
     return data.output;
@@ -891,11 +895,13 @@ async function runTool(name,a){
     return data.output;
   }
   if(name==="computer_hotkey"){
+    if(!confirm("The agent wants to press a keyboard shortcut on your Windows desktop:\n\n"+JSON.stringify(a.keys||[])+"\n\nAllow this action?"))return "User declined the computer hotkey.";
     const data=await workerRequest({action:"computer_hotkey",keys:a.keys});
     if(!data.ok)throw Error(data.error||"Failed to press hotkey.");
     return data.output;
   }
   if(name==="computer_emergency_stop"){
+    if(!a.activate&&!confirm("Release the global computer-use emergency stop? The agent will be able to control desktop applications again."))return "Emergency stop remains active.";
     const data=await workerRequest({action:"computer_emergency_stop",activate:!!a.activate});
     if(!data.ok)throw Error(data.error||"Failed to set emergency stop.");
     return data.output;

@@ -130,6 +130,21 @@ class ComputerAdapter:
             self._desktop = None
             self._initialized = False
 
+    def computer_initialize(self, args: Dict[str, Any]) -> AdapterResult:
+        """Expose the adapter lifecycle through the same tool dispatch path."""
+        try:
+            self.initialize(screenshot_dir=args.get("screenshot_dir"))
+            return AdapterResult(ok=True, output="Computer-use adapter initialized.")
+        except Exception as exc:
+            return AdapterResult(ok=False, error=str(exc))
+
+    def computer_shutdown(self, args: Dict[str, Any]) -> AdapterResult:
+        try:
+            self.shutdown()
+            return AdapterResult(ok=True, output="Computer-use adapter shut down.")
+        except Exception as exc:
+            return AdapterResult(ok=False, error=str(exc))
+
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
