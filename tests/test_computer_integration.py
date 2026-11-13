@@ -2,10 +2,10 @@ import os
 import time
 import unittest
 
-from adapters.computer import ComputerAdapter
+from adapters.computer import ComputerAdapter, _PYWINAUTO_AVAILABLE
 
 
-@unittest.skipIf(os.name != "nt", "Computer use test targets Windows runtime")
+@unittest.skipIf(os.name != "nt" or not _PYWINAUTO_AVAILABLE, "Computer use integration requires Windows and pywinauto")
 class ComputerIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.adapter = ComputerAdapter()

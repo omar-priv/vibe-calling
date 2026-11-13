@@ -57,16 +57,8 @@ class WorkerApiIntegrationTests(unittest.TestCase):
             time.sleep(0.2)
         # Allow adapters a moment to finish initialization.
         time.sleep(1.0)
-        # Wait until the sandbox adapter reports available (it initializes
-        # workspaces + ACL + taskkill). If it never does, skip sandbox tests.
-        cls.SANDBOX_READY = False
-        deadline = time.time() + 15
-        while time.time() < deadline:
-            caps = worker_api.capabilities({})
-            if caps["adapters"].get("sandbox", {}).get("available"):
-                cls.SANDBOX_READY = True
-                break
-            time.sleep(0.3)
+        # The sandbox is intentionally reported as unavailable until genuine
+        # Windows OS-level isolation is implemented and validated.
 
     @classmethod
     def tearDownClass(cls):
@@ -185,46 +177,30 @@ class WorkerApiIntegrationTests(unittest.TestCase):
         self.assertIn("matching tool action", result["error"])
 
     def test_execute_sandbox_adapter_via_api(self):
-        if not self.__class__.SANDBOX_READY:
-            self.skipTest("sandbox adapter not available in this environment")
-        import tempfile
-        tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(tmp.cleanup)
-        worker_api._get_store()
-        # Use the sandbox adapter directly via execute_adapter.
         result = worker_api.execute_adapter({
             "adapter": "sandbox",
             "tool_name": "sandbox_command",
-            "args": {
-                "command": "cmd /c echo hello",
-                "workspace": "default",
-                "timeout_sec": 10,
-            },
-        })
-        self.assertTrue(result["ok"], result.get("error"))
-
-    def test_sandbox_rejects_bad_command_via_api(self):
-        if not self.__class__.SANDBOX_READY:
-            self.skipTest("sandbox adapter not available in this environment")
-        result = worker_api.execute_adapter({
-            "adapter": "sandbox",
-            "tool_name": "sandbox_command",
-            "args": {
-                "command": "cmd /c echo a & echo b",
-                "workspace": "default",
-                "timeout_sec": 10,
-            },
+            "args": {"command": "cmd /c echo hello"},
         })
         self.assertFalse(result["ok"])
-        self.assertIn("blocked", result.get("error", "").lower())
+        self.assertIn("not available", result.get("error", "").lower())
 
-    def test_capabilities_adapter_available(self):
-        if not self.__class__.SANDBOX_READY:
-            self.skipTest("sandbox adapter not available in this environment")
+    def test_sandbox_rejects_bad_command_via_api(self):
+        result = worker_api.execute_adapter({
+            "adapter": "sandbox",
+            "tool_name": "sandbox_command",
+            "args": {"command": "cmd /c echo a & echo b"},
+        })
+        self.assertFalse(result["ok"])
+        self.assertIn("not available", result.get("error", "").lower())
+
+    def test_capabilities_reports_disabled_sandbox(self):
         caps = worker_api.capabilities({})
         self.assertTrue(caps["ok"])
         sandbox = caps["adapters"].get("sandbox", {})
-        self.assertTrue(sandbox.get("available"))
+        self.assertIn("sandbox", caps["adapters"])
+        self.assertFalse(sandbox.get("available"))
+        self.assertIn("Disabled", sandbox.get("reason", ""))
 
 
 if __name__ == "__main__":

@@ -22,13 +22,20 @@ from typing import Optional, Dict, Any, List
 from worker.task_state import TaskRecord
 from worker.worker import AdapterResult
 
-if os.name == "nt":
-    import win32security  # type: ignore
-    import win32process  # type: ignore
-    import win32con  # type: ignore
-    import win32api  # type: ignore
-    _WIN32_API = True
-else:
+# The sandbox is intentionally disabled until real OS-level isolation exists.
+# Keep this module importable when optional pywin32 components are not installed
+# so capability reporting can honestly show it as unavailable instead of
+# silently dropping the adapter from /api/capabilities.
+try:
+    if os.name == "nt":
+        import win32security  # type: ignore
+        import win32process  # type: ignore
+        import win32con  # type: ignore
+        import win32api  # type: ignore
+        _WIN32_API = True
+    else:
+        _WIN32_API = False
+except ImportError:
     _WIN32_API = False
 
 
